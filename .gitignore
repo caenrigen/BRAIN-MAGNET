@@ -1,0 +1,12 @@
+# jupyter notebook
+.ipynb_checkpoints
+*.ipynb
+
+# System files
+*.DS_Store
+desktop.ini
+
+# python
+*.egg-info/
+*.pyc
+__pycache__
