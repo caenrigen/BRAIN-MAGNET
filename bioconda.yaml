@@ -1,0 +1,29 @@
+# conda env create -n g -f bioconda.yaml
+name: g
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults  ## ignore user settings
+dependencies:
+  ## R (CRAN)
+  - r-irkernel
+  - r-tidyverse
+  - r-wordcloud
+  - r-ggrepel
+  - r-ggpubr
+  - r-openxlsx
+  - r-ggrastr
+  - r-reticulate
+  # allows to install packages from git repositories within R
+  # requires `brew install libgit2`
+  - r-devtools
+
+  ## R (Bioconductor)
+  # the only package I could not install from BiocManager on macOS arm64
+  - bioconductor-biocparallel
+
+  ## tabix (Bioconda)
+  - htslib
+
+  # installed automatically
+  # - python
