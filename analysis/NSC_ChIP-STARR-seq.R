@@ -1,41 +1,96 @@
+# ---
+# jupyter:
+#   jupytext:
+#     cell_metadata_filter: -all
+#     text_representation:
+#       extension: .R
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.7
+#   kernelspec:
+#     display_name: R
+#     language: R
+#     name: ir
+# ---
+
+# # Install R dependencies
+
+.libPaths()
+
+Sys.setenv(MACOSX_DEPLOYMENT_TARGET = "11.0")
+
+Sys.getenv(c("MACOSX_DEPLOYMENT_TARGET"))
+
+install.packages("BiocManager")
+
+BiocManager::install(version = "3.20")
+
+BiocManager::valid()
+
+BiocManager::install(c(
+"Biostrings",
+"PRROC",
+"GenomicRanges"
+))
+
+# devtools::install_github("grimbough/rhdf5filters", ref = "CC99")
+# equivalent to devtools, requires devtools
+BiocManager::install('grimbough/rhdf5filters', ref = 'CC99', force = TRUE)
+
+BiocManager::install(c("phastCons100way.UCSC.hg38"))
+
+BiocManager::install(c("BSgenome.Hsapiens.UCSC.hg38"))
+
+BiocManager::install(c("smplot2"))
+
+# ## Load libraries
+
+# Standard R
 library(dplyr)
-library(ggplot2)
-library(ggpubr)
-library(ggrepel)
-library(readxl)
 library(tidyr)
 library(data.table)
-library(wordcloud)
-library(openxlsx)
-library(BSgenome.Hsapiens.UCSC.hg38)
-library(phastCons100way.UCSC.hg38)
-library(GenomicRanges)
-library(Biostrings)
+library(ggplot2)
+library(readxl)
 library(purrr)
+library(wordcloud)
+library(ggrepel)
+library(ggpubr)
+library(openxlsx)
+
+# From Bioconductor
+library(Biostrings)
 library(PRROC)
+library(GenomicRanges)
+library(phastCons100way.UCSC.hg38)
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+# # Configs
+
 options(scipen = 999)
 
-setwd("/Users/Ruizhi/Work/EMC/Papers/ChIP-STARR-seq NSC/Scripts/")
+# setwd("/Users/Ruizhi/Work/EMC/Papers/ChIP-STARR-seq NSC/Scripts/")
+setwd("/Volumes/Famafia/brain-magnet")
 
-#########################
-###Fig. 1B and Fig. 2B###
-#########################
+# # Figures
 
-NSC_rank<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
+# ## Fig. 1B and Fig. 2B
+
+NSC_rank<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
   select(c("log2(avg.NSC.RPP+1)", "5_Categories")) %>%
   unique() %>% 
   arrange(`log2(avg.NSC.RPP+1)`) %>%
   mutate(id=row_number())
 colnames(NSC_rank) <- c("log2(RPP+1)", "5_Categories", "id")
-  
-ESC_rank <- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
+
+ESC_rank <- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
   select(c("log2(avg.ESC.RPP+1)", "5_Categories")) %>%
   unique() %>% 
   arrange(`log2(avg.ESC.RPP+1)`) %>%
   mutate(id=row_number())
 colnames(ESC_rank) <- c("log2(RPP+1)", "5_Categories", "id")
 
-### Fig. 1B (NSC activity Rank)
+# ### Fig. 1B (NSC activity Rank)
+
 ggplot(NSC_rank, aes(id, `log2(RPP+1)`)) + 
   geom_point(size=0.5, color = "#CC0000") +
   scale_x_continuous(breaks=seq(0,149000,29800), labels = seq(0,10,by=2))+
@@ -43,7 +98,8 @@ ggplot(NSC_rank, aes(id, `log2(RPP+1)`)) +
   xlab("NSCs enhancers") + ylab("log2(RPP + 1)") +
   theme(axis.title = element_text(size=16), axis.text =  element_text(size=16)) 
 
-### Fig. 2B (ESC activity Rank)
+# ### Fig. 2B (ESC activity Rank)
+
 ggplot(ESC_rank, aes(id, `log2(RPP+1)`)) + 
   geom_point(size=0.5, color = "#000099") +
   scale_x_continuous(breaks=seq(0,149000,29800), labels = seq(0,10,by=2))+
@@ -55,18 +111,14 @@ ggplot(ESC_rank, aes(id, `log2(RPP+1)`)) +
 rm(list=ls())
 gc()
 
-##################################
-###Fig. 1D, Fig. 1E and Fig. 1H###
-###Fig. 2C, Fig. 2D and Fig. 2E###
-##################################
+# ## Fig. 1D, Fig. 1E and Fig. 1H / Fig. 2C, Fig. 2D and Fig. 2E
 
 NSC_color <- c("#FFE6E6", "#FFCCCC","#FF9999","#FF6666","#FF3333","#FF0000","#CC0000")
 ESC_color <- c("#CCCCFF","#9999FF","#6666FF","#6666FF","#0000FF","#0000CC","#000099")
 
-### 
-### Fig. 1D (NSC target gene expression)
-### 
-NCREs<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
+# ### Fig. 1D (NSC target gene expression)
+
+NCREs<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
   .[,c(1,5,7,8)] %>% unique() %>%
   separate(col = NCREs, into = c("chr", "start_tmp"), sep = ":") %>%
   separate(col = start_tmp, into = c("start", "end"), sep = "-") %>%
@@ -74,7 +126,7 @@ NCREs<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, 
   mutate(end = as.numeric(end))
 colnames(NCREs) <- c("chr", "start", "end", "Cateogory", "GeneType", "GeneName")
 
-NCREs_top10<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
+NCREs_top10<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
   .[,c(1,4,7,8)] %>%
   subset(`10_Categories` == "Category_10") %>%
   separate(col = NCREs, into = c("chr", "start_tmp"), sep = ":") %>%
@@ -84,7 +136,7 @@ NCREs_top10<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Tar
 NCREs_top10[, "10_Categories"] <- "Top10"
 colnames(NCREs_top10) <- c("chr", "start", "end", "Cateogory", "GeneType", "GeneName")
 
-NCREs_top10_OMIM<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
+NCREs_top10_OMIM<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 1) %>%
   subset(`10_Categories` == "Category_10") %>%
   filter(!is.na(OMIM_Phenotypes)) %>%
   .[,c(1,4,7,8)] %>%
@@ -97,7 +149,7 @@ colnames(NCREs_top10_OMIM) <- c("chr", "start", "end", "Cateogory", "GeneType", 
 
 NCREs <- rbind(NCREs, NCREs_top10, NCREs_top10_OMIM) %>% unique()
 
-expression <- read_excel("data/Supplementary Table 8 - Gene expression (RNA-seq).xlsx")
+expression <- read_excel("Supplementary Tables/Supplementary Table 8 - Gene expression (RNA-seq).xlsx")
 
 NCREs_gene.expression<- NCREs %>%
   merge(expression[,c(2,8,9)], by = c("GeneName")) %>%
@@ -128,9 +180,8 @@ wilcox.test(subset(NCREs_gene.expression, NCREs_gene.expression$Cateogory == "Ca
 
 rm(NCREs_top10, NCREs_top10_OMIM, NCREs_gene.expression, expression)
 
-### 
-### Fig. 1E (NSC target gene pLI score)
-### 
+# ### Fig. 1E (NSC target gene pLI score)
+
 pLI <- read.table("data/pLI.score.bed"); colnames(pLI) <- c("GeneName", "pLI")
 NCREs_gene.pLI<- NCREs %>%
   merge(pLI, by = c("GeneName")) %>%
@@ -155,9 +206,7 @@ wilcox.test(subset(NCREs_gene.pLI, NCREs_gene.pLI$Cateogory == "Top10")$pLI,
 
 rm(NCREs_gene.pLI, pLI)
 
-### 
-### Fig. 1H (NSC NCREs category, sequence features) 
-### 
+# ### Fig. 1H (NSC NCREs category, sequence features) 
 
 ## ncER percentile
 ncER <- read.table("data/Scaffolds_nCER_hg38.bed"); colnames(ncER) <- c("chr", "start", "end", "mean", "median")
@@ -303,10 +352,9 @@ wilcox.test(subset(NCREs_cadd, NCREs_cadd$Cateogory == "Top10_OMIM")$median,
 
 rm(cadd, NCREs_cadd)
 
-### 
-### Fig. 2C (ESC target gene expression)
-### 
-NCREs<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
+# ### Fig. 2C (ESC target gene expression)
+
+NCREs<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
   .[,c(1,5,7,8)] %>% unique() %>%
   tidyr::separate(col = NCREs, into = c("chr", "start_tmp"), sep = ":") %>%
   tidyr::separate(col = start_tmp, into = c("start", "end"), sep = "-") %>%
@@ -314,7 +362,7 @@ NCREs<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, 
   mutate(end = as.numeric(end))
 colnames(NCREs) <- c("chr", "start", "end", "Cateogory", "GeneType", "GeneName")
 
-NCREs_top10<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
+NCREs_top10<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
   .[,c(1,4,7,8)] %>%
   subset(`10_Categories` == "Category_10") %>%
   separate(col = NCREs, into = c("chr", "start_tmp"), sep = ":") %>%
@@ -324,7 +372,7 @@ NCREs_top10<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Tar
 NCREs_top10[, "10_Categories"] <- "Top10"
 colnames(NCREs_top10) <- c("chr", "start", "end", "Cateogory", "GeneType", "GeneName")
 
-NCREs_top10_OMIM<- read_excel("data/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
+NCREs_top10_OMIM<- read_excel("Supplementary Tables/Supplementary Table 5 - Scaffold, Categories, Targets, HPO.xlsx", sheet = 2) %>%
   subset(`10_Categories` == "Category_10") %>%
   filter(!is.na(OMIM_Phenotypes)) %>%
   .[,c(1,4,7,8)] %>%
@@ -337,7 +385,7 @@ colnames(NCREs_top10_OMIM) <- c("chr", "start", "end", "Cateogory", "GeneType", 
 
 NCREs <- rbind(NCREs, NCREs_top10, NCREs_top10_OMIM) %>% unique()
 
-expression <- read_excel("data/Supplementary Table 8 - Gene expression (RNA-seq).xlsx")
+expression <- read_excel("Supplementary Tables/Supplementary Table 8 - Gene expression (RNA-seq).xlsx")
 
 NCREs_gene.expression<- NCREs %>%
   merge(expression[,c(2,8,9)], by = c("GeneName")) %>%
@@ -368,9 +416,8 @@ wilcox.test(subset(NCREs_gene.expression, NCREs_gene.expression$Cateogory == "To
 
 rm(NCREs_top10, NCREs_top10_OMIM, NCREs_gene.expression, expression)
 
-### 
-### Fig. 2D (ESC target gene pLI score)
-### 
+# ### Fig. 2D (ESC target gene pLI score)
+
 pLI <- read.table("data/pLI.score.bed"); colnames(pLI) <- c("GeneName", "pLI")
 NCREs_gene.pLI<- NCREs %>%
   merge(pLI, by = c("GeneName")) %>%
@@ -395,9 +442,7 @@ wilcox.test(subset(NCREs_gene.pLI, NCREs_gene.pLI$Cateogory == "Category_5")$pLI
 
 rm(NCREs_gene.pLI, pLI)
 
-### 
-### Fig. 2E (ESC NCREs category, sequence features) 
-### 
+# ### Fig. 2E (ESC NCREs category, sequence features) 
 
 ## ncER percentile
 ncER <- read.table("data/Scaffolds_nCER_hg38.bed"); colnames(ncER) <- c("chr", "start", "end", "mean", "median")
@@ -544,11 +589,11 @@ wilcox.test(subset(NCREs_cadd, NCREs_cadd$Cateogory == "Top10_OMIM")$median,
 
 rm(cadd, NCREs_cadd)
 
-#########################
-###Fig. 1F and Fig. 2F###
-#########################
-### Fig. 1F (NSC target gene GO enrichment) --> load sheet_nums <- 1:6 
-### Fig. 2D (ESC target gene GO enrichment) --> load sheet_nums <- 7:12
+# ## Fig. 1F and Fig. 2F
+#
+# Fig. 1F (NSC target gene GO enrichment) --> load sheet_nums <- 1:6
+#
+# Fig. 2D (ESC target gene GO enrichment) --> load sheet_nums <- 7:12
 
 # Define a function to process the data
 process_go_terms <- function(file_path, sheet_num, category_name) {
@@ -584,7 +629,7 @@ create_wordcloud <- function(file_path, sheet_nums, category_names) {
 }
 
 # Define file path, sheet numbers, and category names
-file_path <- "data/Supplementary Table 6 - GO BP NSCs and ESCs.xlsx"
+file_path <- "Supplementary Tables/Supplementary Table 6 - GO BP NSCs and ESCs.xlsx"
 
 sheet_nums <- 1:6 ### Fig. 1F (NSC target gene GO enrichment)
 # sheet_nums <- 7:12 ### Fig. 2D (ESC target gene GO enrichment)
@@ -598,7 +643,7 @@ gc()
 
 
 #### TEST: dot plot
-file_path <- "data/Supplementary Table 6 - GO BP NSCs and ESCs.xlsx"
+file_path <- "Supplementary Tables/Supplementary Table 6 - GO BP NSCs and ESCs.xlsx"
 go_terms <- read.xlsx(file_path, sheet = 1)
 go_terms$Term <- sub("\\s*\\(.*", "", go_terms$Term)
 # go_terms$Overlap <- sub("\\s*\\/.*", "", go_terms$Overlap)
@@ -610,8 +655,6 @@ go_terms$Term <- gsub("negative regulation", "neg. reg.", go_terms$Term)
 go_terms$Term <- gsub("positive regulation", "pos. reg.", go_terms$Term)
 go_terms$Term <- gsub("regulation", "reg.", go_terms$Term)
 go_terms$Term <- gsub("polymerase", "pol", go_terms$Term)
-
-
 
 colors <- brewer.pal(9, "Reds") ### Fig. 1F (NSC target gene GO enrichment)
 
@@ -627,13 +670,11 @@ ggplot(go_terms[1:10,]) +
   ggtitle("Dotplot of top 10 significant GO terms")
 
 
-#############
-###Fig. 3C###
-#############
+# ## Fig. 3C
 
-### Fig. 3C: TF-modisco crucial motifs
+# ### Fig. 3C: TF-modisco crucial motifs
 
-excel_file <- "data/Supplementary Table 14 - TF-modisco motifs.xlsx"
+excel_file <- "Supplementary Tables/Supplementary Table 14 - TF-modisco motifs.xlsx"
 all_tabs <- excel_sheets(excel_file)
 tabs_to_read <- all_tabs[1:6] 
 data_list <- map(tabs_to_read, ~ read_excel(excel_file, sheet = .x) %>%
@@ -682,11 +723,9 @@ ggplot(combined_data, aes(x = num_seqlets, y = nor_pval)) +
 rm(list=ls())
 gc()
 
-#####################
-###Fig. 3B and S5C###
-#####################
+# ## Fig. 3B and S5C
 
-### Fig. 3B and S5C: PRROC for AUPRC in Top10 and Bottom10
+# ### Fig. 3B and S5C: PRROC for AUPRC in Top10 and Bottom10
 
 preds_targets<- read.csv("data/Top_Bottom_ESC.csv")
 # calculate precision and recall values
@@ -696,11 +735,9 @@ plot(pr)
 roc <- roc.curve(scores.class0 = preds_targets$preds, weights.class0 = preds_targets$label, curve = TRUE)
 plot(roc)
 
-##############
-###Fig. S5B###
-##############
+# ## Fig. S5B
 
-### Fig. S5B: preds, targets correlation of BRAIN-MAGNET
+# ### Fig. S5B: preds, targets correlation of BRAIN-MAGNET
 
 library(smplot2)
 library(ggrastr)
@@ -765,15 +802,11 @@ ggplot(df, aes(x=targets, y=preds)) +
 rm(list=ls())
 gc()
 
+# ## Fig. S5A
 
+# ### Fig. S5A: gnomAD rare variants enrichment
 
-##################
-#####Fig. S5A#####
-##################
-
-### Fig. S5A: gnomAD rare variants enrichment
-
-burden_dat <- read_excel("data/Supplementary Table 13 - gnomAD variants enrichment.xlsx", sheet = 1)
+burden_dat <- read_excel("Supplementary Tables/Supplementary Table 13 - gnomAD variants enrichment.xlsx", sheet = 1)
 unique_groups <- unique(burden_dat$group)
 
 subsets <- lapply(unique_groups, function(group_name) {
