@@ -226,24 +226,67 @@ class EarlyStopping:
 # ### Build deep learning model
 
 # %%
+class ResidualBlock(nn.Module):
+    """
+    A basic residual block for 1D convolution over a 4-channel DNA input.
+    For simplicity, we:
+      - Use two consecutive (Conv -> BN -> ReLU) operations.
+      - Optionally apply a 1x1 Conv in the skip path if in/out channels differ.
+      - Keep stride=1 to preserve spatial dimension, then handle downsampling
+        via MaxPool2d outside of this block.
+    """
+
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super().__init__()
+        self.conv1 = Conv2d(
+            in_channels, out_channels, kernel_size=kernel_size, padding="same"
+        )
+        self.bn1 = BatchNorm2d(out_channels)
+        self.relu = ReLU(inplace=True)
+        self.conv2 = Conv2d(
+            out_channels, out_channels, kernel_size=kernel_size, padding="same"
+        )
+        self.bn2 = BatchNorm2d(out_channels)
+
+        # If the input and output channel counts differ, adjust skip path
+        self.skip_conv = None
+        if in_channels != out_channels:
+            self.skip_conv = nn.Sequential(
+                Conv2d(in_channels, out_channels, kernel_size=1),
+                BatchNorm2d(out_channels),
+            )
+
+    def forward(self, x):
+        skip = x
+        # Adjust skip path if needed
+        if self.skip_conv is not None:
+            skip = self.skip_conv(skip)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # Add skip connection
+        out = out + skip
+        out = self.relu(out)
+        return out
+
+
 class CNN_STARR(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = Sequential(
-            Conv2d(4, 128, (1, 19), padding="same"),
-            BatchNorm2d(128),
-            ReLU(),
-            MaxPool2d((1, 2), (1, 2)),
+            ResidualBlock(in_channels=4, out_channels=128, kernel_size=(1, 19)),
+            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
             #
-            Conv2d(128, 256, (1, 15), padding="same"),
-            BatchNorm2d(256),
-            ReLU(),
-            MaxPool2d((1, 2), (1, 2)),
+            ResidualBlock(in_channels=128, out_channels=256, kernel_size=(1, 15)),
+            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
             #
-            Conv2d(256, 512, (1, 11), padding="same"),
-            BatchNorm2d(512),
-            ReLU(),
-            MaxPool2d((1, 2), (1, 2)),
+            ResidualBlock(in_channels=256, out_channels=512, kernel_size=(1, 11)),
+            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
             #
             AdaptiveAvgPool2d((1, 1)),
             Flatten(),
