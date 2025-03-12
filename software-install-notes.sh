@@ -13,7 +13,8 @@ BiocManager::valid()
 # Update packages if needed
 # BiocManager::install(c(...), update = TRUE, ask = FALSE, force = TRUE)
 
-# Just in case
+# Just in case some R packages are not following the guidelines of passing downstream
+# the same flags that were used to build R
 Sys.setenv(MACOSX_DEPLOYMENT_TARGET = "11.0")
 
 BiocManager::install(c(
@@ -23,8 +24,8 @@ BiocManager::install(c(
 ))
 
 # Required by phastCons100way.UCSC.hg38
-# CC99 is a temporary branch, expected to be merged into devel
-BiocManager::install('grimbough/rhdf5filters', ref = 'CC99', force = TRUE)
+# Update should be available from Bioconductor shortly
+BiocManager::install('grimbough/rhdf5filters', ref = 'devel', force = TRUE)
 BiocManager::install(c("phastCons100way.UCSC.hg38"))
 BiocManager::install(c("BSgenome.Hsapiens.UCSC.hg38"))
 

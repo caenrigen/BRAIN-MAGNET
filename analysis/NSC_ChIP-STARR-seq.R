@@ -13,7 +13,9 @@
 #     name: ir
 # ---
 
-# # Install R dependencies
+# # Init
+
+# ## Install R dependencies
 
 .libPaths()
 
@@ -33,9 +35,9 @@ BiocManager::install(c(
 "GenomicRanges"
 ))
 
-# devtools::install_github("grimbough/rhdf5filters", ref = "CC99")
+# devtools::install_github("grimbough/rhdf5filters", ref = "devel")
 # equivalent to devtools, requires devtools
-BiocManager::install('grimbough/rhdf5filters', ref = 'CC99', force = TRUE)
+BiocManager::install('grimbough/rhdf5filters', ref = 'devel', force = TRUE)
 
 BiocManager::install(c("phastCons100way.UCSC.hg38"))
 
