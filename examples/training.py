@@ -28,9 +28,15 @@ import math
 import time
 import random
 from tqdm.auto import tqdm
+from pathlib import Path
+import gc
 
 random_state = 913
 random.seed(random_state)
+
+dbm = Path("/Volumes/Famafia/brain-magnet/")
+dbmrd = dbm / "rd_APP_data"
+dbmt = dbm / "train"
 
 # %%
 import torch
@@ -59,19 +65,13 @@ torch.cuda.is_available(), torch.backends.mps.is_available()
 
 # %%
 # device = torch.device("cuda")
-device = torch.device("cpu")
-# device = torch.device("mps") # for macOS >=14.0
+# device = torch.device("cpu")
+device = torch.device("mps")  # might have priblems for macOS <14.0
 device
 
 
-# %% [raw]
-# # import sys
-# # sys.path.append("/data/scratch/rdeng/enhancer_project/ipython_notebooks/")
-# from helper import IOHelper, SequenceHelper, utils
-# # np.set_printoptions(threshold=sys.maxsize)
-
 # %% [markdown]
-# ### Funtions to load data
+# ### Utilities to encode data
 
 # %%
 def to_uint8(string):
@@ -110,21 +110,6 @@ def pad_post_one_hot(snippet: np.ndarray, arr_pre: int = 1000):
 
 seq = "ACGTATCnotdna"
 to_uint8(seq), one_hot_encode(seq)
-
-# %% [markdown]
-# ### Load sequences data
-
-# %%
-from pathlib import Path
-
-dbm = Path("/Volumes/Famafia/brain-magnet/")
-dbmrd = dbm / "rd_APP_data"
-dbmt = dbm / "train"
-
-# %%
-# Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
-dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.txt.gz")
-dfe
 
 
 # %% [markdown]
@@ -192,17 +177,11 @@ class EarlyStopping:
         path=dbmt,
     ):
         """
-        Args:
-            patience (int): How long to wait after last time validation loss improved.
-                            Default: 10
-            verbose (bool): If True, prints a message for each validation loss improvement.
-                            Default: False
-            delta (float): Minimum change in the monitored quantity to qualify as an improvement.
-                            Default: 0
-            path (str): Path for the checkpoint to be saved to.
-                            Default: 'checkpoint.pt'
-            trace_func (function): trace print function.
-                            Default: print
+        patience (int): How long to wait after last time validation loss improved.
+        verbose (bool): If True, prints a message for each validation loss improvement.
+        delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+        path (str): Path for the checkpoint to be saved to.
+        trace_func (function): trace print function.
         """
         self.patience = patience
         self.verbose = verbose
@@ -247,13 +226,8 @@ class EarlyStopping:
 
 # %%
 class CNN_STARR(nn.Module):
-    """
-    CNN model: 4 convolution layers followed with two linear layers.
-    forward two heads.
-    """
-
     def __init__(self):
-        super(CNN_STARR, self).__init__()
+        super().__init__()
         self.model = Sequential(
             Conv2d(4, 128, (1, 11), padding="same"),
             BatchNorm2d(128),
@@ -267,10 +241,6 @@ class CNN_STARR(nn.Module):
             BatchNorm2d(512),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
-            #             Conv1d(512, 1024, 3, padding=1),
-            #             BatchNorm1d(1024),
-            #             ReLU(),
-            #             MaxPool1d(2),
             Flatten(),
             Linear(64000, 1024),
             BatchNorm1d(1024),
@@ -283,15 +253,14 @@ class CNN_STARR(nn.Module):
             Linear(1024, 1),
         )
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x_input):
+        return self.model(x_input)
 
 
 cnn_starr = CNN_STARR()
-cnn_starr.to(device)
-
-print(cnn_starr)
+# print(cnn_starr)
 summary(cnn_starr, input_size=(4, 1, 1000), batch_size=128)
+_ = cnn_starr.to(device)
 
 
 # %% [markdown]
@@ -324,7 +293,6 @@ def train_model(
     task="NSC",
     device=device,
 ):
-    start_time = time.time()
     # to track the training loss as the model trains
     train_losses = []
     # to track the validation loss as the model trains
@@ -338,6 +306,7 @@ def train_model(
     early_stopping = EarlyStopping(patience, verbose=True)
 
     for epoch in tqdm(range(epochs)):
+        start_time = time.time()
         #################
         # Train the model
         #################
@@ -430,8 +399,8 @@ def loss_fig(train_loss, valid_loss, task):
 
 
 # %% [markdown]
-# ### Evaluating the model
-# #### Model performace: mean squared error (MSE), Person (PCC) and Spearman (SCC) correlation coefficients
+# ### Functions to evaluate model performance
+# mean squared error (MSE), Person (PCC) and Spearman (SCC) correlation coefficients
 
 
 # %%
@@ -478,33 +447,52 @@ def summmary_statistic(set_name, dataloader, main_model, task):
 
 
 # %% [markdown]
+# ### Load data
+
+# %%
+# Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
+dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.csv.gz")
+dfe
+
+# %% [markdown]
 # ### Split data from training
 
 # %%
 # Small sample for testing code
-df = dfe.sample(n=4_000, random_state=random_state)
+# df = dfe.sample(n=100_000, random_state=random_state)
+df = dfe
 
 df_train, df_tmp = train_test_split(df, test_size=0.10, random_state=random_state)
 df_val, df_test = train_test_split(df_tmp, test_size=0.50, random_state=random_state)
-del df_tmp
 
-# %%
+del df_tmp, df, dfe
 df_train
 
 # %% [markdown]
 # ### Run the pipline
 
 # %%
-batch_size = 128
+# Initial model: train_loss: 0.11603, valid_loss 0.16997
+
+# %%
+# Tests on macOS M1 Pro
+# batch_size = 32  # 720s+/epoch
+batch_size = 256  # 454s/epoch
+# batch_size = 512  # 455s/epoch, just uses more RAM
+# batch_size = 128  # 500s/epoch
+
 epochs = 100
 patience = 10
 
 task = "NSC"
 
+fp = dbmt / f"checkpoint_{task}.pth"
+# load the previously trained model to continue the training
+cnn_starr.load_state_dict(torch.load(fp))
+
 # create data
 train_dataloader = create_dataset(df_train, batch_size, task)
 valid_dataloader = create_dataset(df_val, batch_size, task)
-test_dataloader = create_dataset(df_test, batch_size, task)
 
 # train model
 cnn_starr, train_loss, valid_loss = train_model(
@@ -523,59 +511,64 @@ cnn_starr, train_loss, valid_loss = train_model(
 # plot Train and Valid loss
 loss_fig(train_loss, valid_loss, task)
 
-# summary statistics
-# cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth".format(task), map_location=torch.device('cpu')))
-summmary_statistic("Train", train_dataloader, cnn_starr, task)
-summmary_statistic("Valid", valid_dataloader, cnn_starr, task)
-summmary_statistic("Test", test_dataloader, cnn_starr, task)
+# %% [raw]
+# test_dataloader = create_dataset(df_test, batch_size, task)
+#
+# # summary statistics
+# # cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth".format(task), map_location=torch.device('cpu')))
+# summmary_statistic("Train", train_dataloader, cnn_starr, task)
+# summmary_statistic("Valid", valid_dataloader, cnn_starr, task)
+# summmary_statistic("Test", test_dataloader, cnn_starr, task)
 
+# %% [raw]
+# def combine_df(cell, set):
+#     file_seq = str(
+#         "/data/scratch/rdeng/enhancer_project/data/train_set/Sequences_" + set + ".fa"
+#     )
+#     input_fasta = IOHelper.get_fastas_from_file(file_seq, uppercase=True)
+#
+#     targets = np.load(
+#         "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/targets_"
+#         + cell
+#         + "_"
+#         + set
+#         + ".npy"
+#     )
+#     preds = np.load(
+#         "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/preds_"
+#         + cell
+#         + "_"
+#         + set
+#         + ".npy"
+#     )
+#     DF_targets = pd.DataFrame(targets)
+#     DF_preds = pd.DataFrame(preds)
+#
+#     DF_merged = pd.concat([input_fasta, DF_targets, DF_preds], axis=1)
+#     DF_merged.columns = ["location", "sequence", "targets", "preds"]
+#
+#     DF_merged = DF_merged[~DF_merged.location.str.contains("Reversed")]
+#
+#     return DF_merged
+
+# %% [raw]
+# test_nsc = combine_df("ESC", "Test")
+# valid_nsc = combine_df("ESC", "Valid")
+# train_nsc = combine_df("ESC", "Train")
+# whole_nsc = pd.concat([test_nsc, valid_nsc, train_nsc], axis=0)
+#
+# whole_nsc = whole_nsc[["location", "targets", "preds"]]
+# whole_nsc.to_csv(
+#     "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/whole_ESC.csv",
+#     index=False,
+# )
+# # whole_nsc[['location','start']] = whole_nsc['location'].str.split(':',expand=True)
+# # whole_nsc[['start','end']] = whole_nsc['start'].str.split('-',expand=True)
+#
+#
+# # whole_nsc = whole_nsc.sort_values(by=['location', 'start'], ascending=[True, True])
+# # whole_nsc = whole_nsc[['location', 'start', 'end', 'targets', 'preds']]
 
 # %%
-def combine_df(cell, set):
-    file_seq = str(
-        "/data/scratch/rdeng/enhancer_project/data/train_set/Sequences_" + set + ".fa"
-    )
-    input_fasta = IOHelper.get_fastas_from_file(file_seq, uppercase=True)
-
-    targets = np.load(
-        "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/targets_"
-        + cell
-        + "_"
-        + set
-        + ".npy"
-    )
-    preds = np.load(
-        "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/preds_"
-        + cell
-        + "_"
-        + set
-        + ".npy"
-    )
-    DF_targets = pd.DataFrame(targets)
-    DF_preds = pd.DataFrame(preds)
-
-    DF_merged = pd.concat([input_fasta, DF_targets, DF_preds], axis=1)
-    DF_merged.columns = ["location", "sequence", "targets", "preds"]
-
-    DF_merged = DF_merged[~DF_merged.location.str.contains("Reversed")]
-
-    return DF_merged
-
 
 # %%
-test_nsc = combine_df("ESC", "Test")
-valid_nsc = combine_df("ESC", "Valid")
-train_nsc = combine_df("ESC", "Train")
-whole_nsc = pd.concat([test_nsc, valid_nsc, train_nsc], axis=0)
-
-whole_nsc = whole_nsc[["location", "targets", "preds"]]
-whole_nsc.to_csv(
-    "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/whole_ESC.csv",
-    index=False,
-)
-# whole_nsc[['location','start']] = whole_nsc['location'].str.split(':',expand=True)
-# whole_nsc[['start','end']] = whole_nsc['start'].str.split('-',expand=True)
-
-
-# whole_nsc = whole_nsc.sort_values(by=['location', 'start'], ascending=[True, True])
-# whole_nsc = whole_nsc[['location', 'start', 'end', 'targets', 'preds']]
