@@ -1,0 +1,16 @@
+pandas
+numpy
+scipy
+seaborn
+scikit-learn
+torch
+torchaudio
+torchvision
+tensorboard
+torchsummary
+torchmetrics
+
+jupyter-autotime
+jupyter-black
+tqdm
+ipywidgets # for tqdm in Jupyter Lab
