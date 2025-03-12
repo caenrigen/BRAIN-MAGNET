@@ -54,6 +54,7 @@ from torch.nn import (
     Linear,
     Dropout,
     MSELoss,
+    AdaptiveAvgPool2d,
 )
 from torchsummary import summary
 from torchmetrics import SpearmanCorrCoef, PearsonCorrCoef
@@ -229,27 +230,34 @@ class CNN_STARR(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = Sequential(
-            Conv2d(4, 128, (1, 11), padding="same"),
+            Conv2d(4, 128, (1, 19), padding="same"),
             BatchNorm2d(128),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
-            Conv2d(128, 256, (1, 9), padding="same"),
+            #
+            Conv2d(128, 256, (1, 15), padding="same"),
             BatchNorm2d(256),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
-            Conv2d(256, 512, (1, 7), padding="same"),
+            #
+            Conv2d(256, 512, (1, 11), padding="same"),
             BatchNorm2d(512),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
+            #
+            AdaptiveAvgPool2d((1, 1)),
             Flatten(),
-            Linear(64000, 1024),
+            #
+            Linear(512, 1024),
             BatchNorm1d(1024),
             ReLU(),
             Dropout(0.4),
+            #
             Linear(1024, 1024),
             BatchNorm1d(1024),
             ReLU(),
             Dropout(0.4),
+            #
             Linear(1024, 1),
         )
 
@@ -452,7 +460,6 @@ def summmary_statistic(set_name, dataloader, main_model, task):
 # %%
 # Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
 dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.csv.gz")
-dfe
 
 # %% [markdown]
 # ### Split data from training
@@ -488,7 +495,8 @@ task = "NSC"
 
 fp = dbmt / f"checkpoint_{task}.pth"
 # load the previously trained model to continue the training
-cnn_starr.load_state_dict(torch.load(fp))
+if fp.is_file():
+    cnn_starr.load_state_dict(torch.load(fp))
 
 # create data
 train_dataloader = create_dataset(df_train, batch_size, task)
