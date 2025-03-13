@@ -102,7 +102,7 @@ def one_hot_encode(sequence: str):
     return HASH_TABLE[to_uint8(sequence)]
 
 
-def pad_post_one_hot(snippet: np.ndarray, arr_pre: int = 1000):
+def pad_post_one_hot(snippet: np.ndarray, arr_pre: int = 1024):
     assert len(snippet) <= arr_pre, len(snippet)
     arr_len = len(snippet)
     pad = (arr_pre - arr_len) / 2
@@ -263,7 +263,7 @@ class CNN_STARR(nn.Module):
             nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.AdaptiveAvgPool2d((1, 4)),
             # nn.Flatten(),
         )
 
@@ -271,7 +271,7 @@ class CNN_STARR(nn.Module):
         # Flatten to [batch, 512].
         # So the next input dimension is 512.
         self.head = nn.Sequential(
-            nn.Linear(512, 1024),
+            nn.Linear(512 * 4, 1024),
             # nn.Linear(64000, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
@@ -307,7 +307,7 @@ class CNN_STARR(nn.Module):
 
 cnn_starr = CNN_STARR()
 # print(cnn_starr)
-summary(cnn_starr, input_size=(4, 1, 1000), batch_size=128)
+summary(cnn_starr, input_size=(4, 1, 1024), batch_size=128)
 _ = cnn_starr.to(device)
 sum(p.numel() for p in cnn_starr.parameters())
 
