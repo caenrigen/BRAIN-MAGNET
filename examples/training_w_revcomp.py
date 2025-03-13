@@ -251,33 +251,28 @@ class CNN_STARR(nn.Module):
         #    We'll do smaller kernels here just for the example.
         #    Also note the final AdaptiveAvgPool2d to shrink to (1,1).
         self.backbone = nn.Sequential(
-            nn.Conv2d(4, 128, kernel_size=(1, 15), padding="same"),
+            nn.Conv2d(4, 128, kernel_size=(1, 11), padding="same"),
             nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Conv2d(128, 256, kernel_size=(1, 11), padding="same"),
+            nn.Conv2d(128, 256, kernel_size=(1, 9), padding="same"),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Conv2d(256, 512, kernel_size=(1, 9), padding="same"),
+            nn.Conv2d(256, 512, kernel_size=(1, 7), padding="same"),
             nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Conv2d(512, 1024, kernel_size=(1, 7), padding="same"),
-            nn.BatchNorm2d(1024),
-            nn.ReLU(),
-            nn.MaxPool2d((1, 2), (1, 2)),
-            # nn.AdaptiveMaxPool2d((1, 1)),
-            nn.Flatten(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            # nn.Flatten(),
         )
 
         # After adaptive pooling, the shape is [batch, 512, 1, 1].
         # Flatten to [batch, 512].
         # So the next input dimension is 512.
         self.head = nn.Sequential(
-            # nn.Linear(512, 1024),
+            nn.Linear(512, 1024),
             # nn.Linear(64000, 1024),
-            nn.Linear(63488, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
             nn.Dropout(0.4),
