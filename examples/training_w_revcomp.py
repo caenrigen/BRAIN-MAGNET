@@ -300,7 +300,7 @@ class CNN_STARR(nn.Module):
         # If you prefer to pool embeddings before the final head:
         embed_fwd = self.forward_backbone_only(x_input)
         embed_rc = self.forward_backbone_only(reverse_complement(x_input))
-        embed_merged = torch.max(embed_fwd, embed_rc)
+        embed_merged = embed_fwd + embed_rc
         out = self.head(embed_merged)
         return out
 
