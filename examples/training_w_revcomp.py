@@ -284,7 +284,6 @@ class CNN_STARR(nn.Module):
         )
 
     def forward_backbone_only(self, x):
-        """Forward pass that stops right after the backbone (embedding only)."""
         z = self.backbone(x)  # shape [batch, 512, 1, 1]
         z = z.view(z.size(0), -1)  # flatten to [batch, 512]
         return z
@@ -510,7 +509,7 @@ dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.csv.gz")
 # df = dfe.sample(n=100_000, random_state=random_state)
 # df = dfe
 df = dfe[dfe.RevComp == 0]
-df = dfe.sample(frac=0.10, random_state=random_state)
+# df = dfe.sample(frac=0.10, random_state=random_state)
 
 df_train, df_tmp = train_test_split(df, test_size=0.10, random_state=random_state)
 df_val, df_test = train_test_split(df_tmp, test_size=0.50, random_state=random_state)
@@ -531,8 +530,8 @@ batch_size = 256  # 454s/epoch
 # batch_size = 512  # 455s/epoch, just uses more RAM
 # batch_size = 128  # 500s/epoch
 
-epochs = 40
-patience = 10
+epochs = 100
+patience = 20
 
 task = "NSC"
 
