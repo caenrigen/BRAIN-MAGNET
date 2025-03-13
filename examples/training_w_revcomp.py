@@ -263,6 +263,10 @@ class CNN_STARR(nn.Module):
             nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
+            nn.Conv2d(512, 1024, kernel_size=(1, 7), padding="same"),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 2), (1, 2)),
             # nn.AdaptiveMaxPool2d((1, 1)),
             nn.Flatten(),
         )
@@ -272,7 +276,8 @@ class CNN_STARR(nn.Module):
         # So the next input dimension is 512.
         self.head = nn.Sequential(
             # nn.Linear(512, 1024),
-            nn.Linear(64000, 1024),
+            # nn.Linear(64000, 1024),
+            nn.Linear(63488, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(),
             nn.Dropout(0.4),
