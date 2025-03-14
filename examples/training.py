@@ -461,15 +461,15 @@ def bins(s):
     return pd.cut(np.log2(s + 1), bins=8, labels=False)
 
 
-# Global sample for quick tests
-_, df = train_test_split(
-    dfe,
-    test_size=0.20,
-    random_state=random_state,
-    stratify=bins(dfe.NSC_log2_enrichment),
-)
+# Global sample for quicker tests
+# _, df = train_test_split(
+#     dfe,
+#     test_size=0.30,
+#     random_state=random_state,
+#     stratify=bins(dfe.NSC_log2_enrichment),
+# )
 
-# df = dfe
+df = dfe
 
 # Split
 df_train, df = train_test_split(
@@ -503,7 +503,7 @@ patience = 20
 
 task = "NSC"
 
-# col_x = "SeqEnc"
+col_x = "SeqEnc"
 # col_x = "SeqShapes"
 # col_x = "SeqAndShapes"
 col_y = f"{task}_log2_enrichment"
