@@ -220,7 +220,7 @@ class CNN_STARR(nn.Module):
         super().__init__()
         self.revcomp = revcomp
         self.backbone = Sequential(
-            Conv2d(8, 128, kernel_size=(1, 11), padding="same"),
+            Conv2d(4, 128, kernel_size=(1, 11), padding="same"),
             BatchNorm2d(128),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
@@ -264,8 +264,8 @@ class CNN_STARR(nn.Module):
         return out
 
 
-cnn_starr = CNN_STARR(revcomp=False)
-summary(cnn_starr, input_size=(8, 1, 1024), batch_size=128)
+cnn_starr = CNN_STARR(revcomp=True)
+summary(cnn_starr, input_size=(4, 1, 1024), batch_size=128)
 cnn_starr.to(device)
 sum(p.numel() for p in cnn_starr.parameters())
 
@@ -403,16 +403,13 @@ dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq.csv.gz", usecols=usecols)
 for c in ("Seq",):
     dfe[f"{c}Enc"] = dfe[c].map(one_hot_encode).map(pad_arr)
 
-# %% [markdown]
+
+# %% [markdown] jp-MarkdownHeadingCollapsed=true
 # #### DNA shape data
 
-# %%
-data = np.load(dbmrd / "shapes.npz")
-list(data.keys())
-
-# %%
-seq_enc = np.stack(list(dfe.SeqEnc))
-seq_enc.shape
+# %% [raw]
+# data = np.load(dbmrd / "shapes.npz")
+# list(data.keys())
 
 # %% [raw]
 # seqs = np.stack(
@@ -425,30 +422,33 @@ seq_enc.shape
 # print(seqs.shape)
 # del seqs, data
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true
 # #### Coupled DNA encoded sequence & DNA shape
 
-# %%
-from sklearn.preprocessing import StandardScaler
+# %% [raw]
+# from sklearn.preprocessing import StandardScaler
+#
+# scaler = StandardScaler()
+# seqs = np.stack(
+#     list(
+#         scaler.fit_transform(np.nan_to_num(data[c]).astype(np.float32))
+#         for c in data.keys()
+#     ),
+#     axis=2,
+# )
+# # pad to 1024 (12, 1000, 12)
+# seqs = np.pad(seqs, ((0, 0), (12, 12), (0, 0)), mode="constant", constant_values=0.0)
+# seqs.shape
 
-scaler = StandardScaler()
-seqs = np.stack(
-    list(
-        scaler.fit_transform(np.nan_to_num(data[c]).astype(np.float32))
-        for c in data.keys()
-    ),
-    axis=2,
-)
-# pad to 1024 (12, 1000, 12)
-seqs = np.pad(seqs, ((0, 0), (12, 12), (0, 0)), mode="constant", constant_values=0.0)
-seqs.shape
+# %% [raw]
+# seq_enc = np.stack(list(dfe.SeqEnc))
+# seq_enc.shape
 
-# %%
-dfe["SeqAndShapes"] = list(np.concatenate((seq_enc, seqs), axis=2))
-del dfe["Seq"]
-del dfe["SeqEnc"]
-del seqs, seq_enc, data
-
+# %% [raw]
+# dfe["SeqAndShapes"] = list(np.concatenate((seq_enc, seqs), axis=2))
+# del dfe["Seq"]
+# del dfe["SeqEnc"]
+# del seqs, seq_enc, data
 
 # %% [markdown]
 # ### Split data for training
@@ -456,13 +456,15 @@ del seqs, seq_enc, data
 # %%
 def bins(s):
     # Can't do less bins AND have enough elements in each bin
+    # There are several "outliers" in the NCREs activity,
+    # take another log2 to compact the data further for assigning bins
     return pd.cut(np.log2(s + 1), bins=8, labels=False)
 
 
 # Global sample for quick tests
 _, df = train_test_split(
     dfe,
-    test_size=0.30,
+    test_size=0.20,
     random_state=random_state,
     stratify=bins(dfe.NSC_log2_enrichment),
 )
@@ -496,14 +498,14 @@ del df
 batch_size = 256  # 454s/epoch, uses more RAM
 # batch_size = 512  # 455s/epoch, just uses more RAM
 
-epochs = 50
-patience = 5
+epochs = 100
+patience = 20
 
 task = "NSC"
 
-col_x = "SeqAndShapes"
-# col_x = "SeqShapes"
 # col_x = "SeqEnc"
+# col_x = "SeqShapes"
+# col_x = "SeqAndShapes"
 col_y = f"{task}_log2_enrichment"
 
 # create data
