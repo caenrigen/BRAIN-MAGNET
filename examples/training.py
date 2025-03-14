@@ -107,7 +107,7 @@ def pad_arr(snippet: np.ndarray, arr_pre: int = 1024):
     assert len(snippet) <= arr_pre, len(snippet)
     arr_len = len(snippet)
     pad = (arr_pre - arr_len) / 2
-    return np.pad(snippet, [(int(pad), math.ceil(pad)), (0.0, 0.0)], mode="constant")
+    return np.pad(snippet, [(int(pad), math.ceil(pad)), (0, 0)], mode="constant")
 
 
 seq = "ACGTATCnotdna"
@@ -119,32 +119,16 @@ to_uint8(seq), one_hot_encode(seq)
 
 
 # %%
-# function to generate all sequences to np.array (one-hot encoding matrix)
-def generate_sequence_matrix(sequences):
-    sequence_matrix = []
-    for seq in sequences:
-        snippet = one_hot_encode(seq)
-        sequence_matrix.append(pad_arr(snippet))
-    return np.array(sequence_matrix, dtype=np.float32)
-
-
-def create_dataloader(df: pd.DataFrame, batch_size: int, task: str):
-    assert task in ("NSC", "ESC"), task
-    Y = df[f"{task}_log2_enrichment"].values
-
-    # Convert each sequence to one-hot encoding
-    seq_matrix = generate_sequence_matrix(df.Seq.values)
-
-    # Replace NaN with zero and infinity with large finite numbers
-    X = np.nan_to_num(seq_matrix)
-    X_reshaped = X.reshape((X.shape[0], X.shape[1], X.shape[2]))
+def create_dataloader(x: pd.Series, y: pd.Series, batch_size: int):
+    x = np.stack(x.values)
 
     # convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
-    tensor_x = torch.Tensor(X_reshaped).permute(0, 2, 1).unsqueeze(2)
-    # add one dimension in targets: [batch] -> [batch, 1]
-    tensor_y = torch.Tensor(Y).unsqueeze(1)
-    tensor_data = TensorDataset(tensor_x, tensor_y)
+    tensor_x = torch.Tensor(x).permute(0, 2, 1).unsqueeze(2)
 
+    # add one dimension in targets: [batch] -> [batch, 1]
+    tensor_y = torch.Tensor(y.values).unsqueeze(1)
+
+    tensor_data = TensorDataset(tensor_x, tensor_y)
     return DataLoader(tensor_data, batch_size)
 
 
@@ -161,11 +145,10 @@ def reverse_complement(x):
     #    If your channel order is (A=0, C=1, G=2, T=3), you can do:
     channel_map = [3, 2, 1, 0]  # T, G, C, A
     x_revcomp = x_rev[:, channel_map, :, :]
-
     return x_revcomp
 
 
-# %% [markdown]
+# %% [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Define EarlyStopping class
 
 
@@ -233,10 +216,11 @@ class EarlyStopping:
 
 # %%
 class CNN_STARR(nn.Module):
-    def __init__(self):
+    def __init__(self, revcomp: bool = False):
         super().__init__()
+        self.revcomp = revcomp
         self.backbone = Sequential(
-            Conv2d(4, 128, kernel_size=(1, 11), padding="same"),
+            Conv2d(8, 128, kernel_size=(1, 11), padding="same"),
             BatchNorm2d(128),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
@@ -248,12 +232,12 @@ class CNN_STARR(nn.Module):
             BatchNorm2d(512),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
-            # AdaptiveAvgPool2d((1, 8)),
-            Flatten(),
+            AdaptiveAvgPool2d((1, 8)),
+            # Flatten(),
         )
         self.head = Sequential(
-            # Linear(512 * 8, 1024),
-            Linear(65536, 1024),
+            Linear(512 * 8, 1024),
+            # Linear(65536, 1024),
             BatchNorm1d(1024),
             ReLU(),
             Dropout(0.4),
@@ -271,15 +255,18 @@ class CNN_STARR(nn.Module):
 
     def forward(self, x_input):
         embed_fwd = self.forward_backbone_only(x_input)
-        embed_rc = self.forward_backbone_only(reverse_complement(x_input))
-        embed_merged = embed_fwd + embed_rc
+        if self.revcomp:
+            embed_rc = self.forward_backbone_only(reverse_complement(x_input))
+            embed_merged = embed_fwd + embed_rc
+        else:
+            embed_merged = embed_fwd
         out = self.head(embed_merged)
         return out
 
 
-cnn_starr = CNN_STARR()
-summary(cnn_starr, input_size=(4, 1, 1024), batch_size=128)
-cnn_starr = cnn_starr.to(device)
+cnn_starr = CNN_STARR(revcomp=False)
+summary(cnn_starr, input_size=(8, 1, 1024), batch_size=128)
+cnn_starr.to(device)
 sum(p.numel() for p in cnn_starr.parameters())
 
 
@@ -394,6 +381,157 @@ def train_model(
 
 
 # %% [markdown]
+# ### Load data
+
+# %%
+# Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
+usecols = [
+    "Chr",
+    "Start",
+    "End",
+    "NSC_log2_enrichment",
+    # "ESC_log2_enrichment",
+    "Seq",
+    # "SeqRevComp",
+]
+dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq.csv.gz", usecols=usecols)
+
+# %% [markdown]
+# #### DNA sequences: encode and pad
+
+# %%
+for c in ("Seq",):
+    dfe[f"{c}Enc"] = dfe[c].map(one_hot_encode).map(pad_arr)
+
+# %% [markdown]
+# #### DNA shape data
+
+# %%
+data = np.load(dbmrd / "shapes.npz")
+list(data.keys())
+
+# %%
+seq_enc = np.stack(list(dfe.SeqEnc))
+seq_enc.shape
+
+# %% [raw]
+# seqs = np.stack(
+#     list(np.nan_to_num(data[c]).astype(np.float32) for c in data.keys()),
+#     axis=2,
+# )
+# # pad to 1024 (12, 1000, 12)
+# seqs = np.pad(seqs, ((0, 0), (12, 12), (0, 0)), mode="constant", constant_values=0.0)
+# dfe["SeqShapes"] = list(seqs)
+# print(seqs.shape)
+# del seqs, data
+
+# %% [markdown]
+# #### Coupled DNA encoded sequence & DNA shape
+
+# %%
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+seqs = np.stack(
+    list(
+        scaler.fit_transform(np.nan_to_num(data[c]).astype(np.float32))
+        for c in data.keys()
+    ),
+    axis=2,
+)
+# pad to 1024 (12, 1000, 12)
+seqs = np.pad(seqs, ((0, 0), (12, 12), (0, 0)), mode="constant", constant_values=0.0)
+seqs.shape
+
+# %%
+dfe["SeqAndShapes"] = list(np.concatenate((seq_enc, seqs), axis=2))
+del dfe["Seq"]
+del dfe["SeqEnc"]
+del seqs, seq_enc, data
+
+
+# %% [markdown]
+# ### Split data for training
+
+# %%
+def bins(s):
+    # Can't do less bins AND have enough elements in each bin
+    return pd.cut(np.log2(s + 1), bins=8, labels=False)
+
+
+# Global sample for quick tests
+_, df = train_test_split(
+    dfe,
+    test_size=0.30,
+    random_state=random_state,
+    stratify=bins(dfe.NSC_log2_enrichment),
+)
+
+# df = dfe
+
+# Split
+df_train, df = train_test_split(
+    df,
+    test_size=0.10,
+    random_state=random_state,
+    stratify=bins(df.NSC_log2_enrichment),
+)
+
+df_val, df_test = train_test_split(
+    df,
+    test_size=0.50,
+    random_state=random_state,
+    stratify=bins(df.NSC_log2_enrichment),
+)
+
+del df
+
+# %% [markdown]
+# ### Run the pipline
+
+# %%
+# Tests on macOS M1 Pro
+# batch_size = 32  # 720s+/epoch
+# batch_size = 128  # 500s/epoch
+batch_size = 256  # 454s/epoch, uses more RAM
+# batch_size = 512  # 455s/epoch, just uses more RAM
+
+epochs = 50
+patience = 5
+
+task = "NSC"
+
+col_x = "SeqAndShapes"
+# col_x = "SeqShapes"
+# col_x = "SeqEnc"
+col_y = f"{task}_log2_enrichment"
+
+# create data
+train_dataloader = create_dataloader(
+    x=df_train[col_x],
+    y=df_train[col_y],
+    batch_size=batch_size,
+)
+valid_dataloader = create_dataloader(
+    x=df_val[col_x],
+    y=df_val[col_y],
+    batch_size=batch_size,
+)
+
+# train model
+cnn_starr, train_loss, valid_loss = train_model(
+    model=cnn_starr,
+    loss_fn=loss_fn,
+    optimizer=optimizer,
+    train_dataloader=train_dataloader,
+    valid_dataloader=valid_dataloader,
+    batch_size=batch_size,
+    patience=patience,
+    epochs=epochs,
+    task=task,
+)
+
+# %% [markdown]
 # ### Function to visualiz the loss and the Early Stopping Checkpoint
 
 
@@ -465,67 +603,6 @@ def summmary_statistic(set_name, dataloader, main_model, task):
     df = pd.DataFrame({"targets": whole_targets, "preds": whole_preds.squeeze(1)})
     return df
 
-
-# %% [markdown]
-# ### Load data
-
-# %%
-# Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
-dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq.csv.gz")
-
-# %%
-dfe
-
-# %%
-data = np.load(dbmrd / "shapes.npz")
-data
-
-# %% [markdown]
-# ### Split data from training
-
-# %%
-# Small sample for testing code
-# df = dfe.sample(n=100_000, random_state=random_state)
-df = dfe
-# df = dfe.sample(frac=0.10, random_state=random_state)
-
-df_train, df_tmp = train_test_split(df, test_size=0.10, random_state=random_state)
-df_val, df_test = train_test_split(df_tmp, test_size=0.50, random_state=random_state)
-
-del df_tmp, df, dfe
-df_train
-
-# %% [markdown]
-# ### Run the pipline
-
-# %%
-# Tests on macOS M1 Pro
-# batch_size = 32  # 720s+/epoch
-# batch_size = 128  # 500s/epoch
-batch_size = 256  # 454s/epoch, uses more RAM
-# batch_size = 512  # 455s/epoch, just uses more RAM
-
-epochs = 100
-patience = 5
-
-task = "NSC"
-
-# create data
-train_dataloader = create_dataset(df_train, batch_size, task)
-valid_dataloader = create_dataset(df_val, batch_size, task)
-
-# train model
-cnn_starr, train_loss, valid_loss = train_model(
-    model=cnn_starr,
-    loss_fn=loss_fn,
-    optimizer=optimizer,
-    train_dataloader=train_dataloader,
-    valid_dataloader=valid_dataloader,
-    batch_size=batch_size,
-    patience=patience,
-    epochs=epochs,
-    task=task,
-)
 
 # %%
 # plot Train and Valid loss
