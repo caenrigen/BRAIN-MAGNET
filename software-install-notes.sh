@@ -28,6 +28,7 @@ BiocManager::install(c(
 BiocManager::install('grimbough/rhdf5filters', ref = 'devel', force = TRUE)
 BiocManager::install(c("phastCons100way.UCSC.hg38"))
 BiocManager::install(c("BSgenome.Hsapiens.UCSC.hg38"))
+BiocManager::install(c("DNAshapeR"))
 
 # NB BiocManager::valid() reports some old packages, I left them be
 # Old packages: 'abind', 'bit64', 'caret', 'clock', 'cpp11', 'curl', 'gower', 'lme4', 'MASS', 'ps', 'textshaping', 'xml2'
