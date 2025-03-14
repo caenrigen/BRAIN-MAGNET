@@ -74,6 +74,7 @@ device
 # %% [markdown]
 # ### Utilities to encode data
 
+
 # %%
 def to_uint8(string):
     return np.frombuffer(string.encode("ascii"), dtype=np.uint8)
@@ -102,7 +103,7 @@ def one_hot_encode(sequence: str):
     return HASH_TABLE[to_uint8(sequence)]
 
 
-def pad_post_one_hot(snippet: np.ndarray, arr_pre: int = 1000):
+def pad_arr(snippet: np.ndarray, arr_pre: int = 1024):
     assert len(snippet) <= arr_pre, len(snippet)
     arr_len = len(snippet)
     pad = (arr_pre - arr_len) / 2
@@ -116,6 +117,7 @@ to_uint8(seq), one_hot_encode(seq)
 # %% [markdown]
 # ### Convert data to tensors
 
+
 # %%
 # function to generate all sequences to np.array (one-hot encoding matrix)
 def generate_sequence_matrix(sequences):
@@ -126,7 +128,7 @@ def generate_sequence_matrix(sequences):
     sequence_matrix = []
     for seq in sequences:
         snippet = one_hot_encode(seq)
-        sequence_matrix.append(pad_post_one_hot(snippet))
+        sequence_matrix.append(pad_arr(snippet))
     return np.array(sequence_matrix)
 
 
@@ -134,7 +136,7 @@ def prepare_tensor(X, Y):
     """
     convert np.array to tensor
     """
-    # convert input: [batch, 1000, 4] -> [batch, 4, 1, 1000]
+    # convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
     tensor_x = torch.Tensor(X).permute(0, 2, 1).unsqueeze(2)
     # add one dimension in targets: [batch] -> [batch, 1]
     tensor_y = torch.Tensor(Y).unsqueeze(1)
@@ -161,8 +163,26 @@ def create_dataset(df: pd.DataFrame, batch_size: int, task: str):
     return DataLoader(tensor_data, batch_size)
 
 
+def reverse_complement(x):
+    """
+    x: A tensor of shape (batch, 4, 1, L)
+       channel 0 = A, channel 1 = C, channel 2 = G, channel 3 = T.
+    Returns the reverse-complement version of x (same shape).
+    """
+    # 1) Flip along the length dimension (dim=3).
+    x_rev = torch.flip(x, dims=[3])
+
+    # 2) Swap A <-> T and C <-> G channels.
+    #    If your channel order is (A=0, C=1, G=2, T=3), you can do:
+    channel_map = [3, 2, 1, 0]  # T, G, C, A
+    x_revcomp = x_rev[:, channel_map, :, :]
+
+    return x_revcomp
+
+
 # %% [markdown]
 # ### Define EarlyStopping class
+
 
 # %%
 class EarlyStopping:
@@ -225,93 +245,74 @@ class EarlyStopping:
 # %% [markdown]
 # ### Build deep learning model
 
+
 # %%
-class ResidualBlock(nn.Module):
-    """
-    A basic residual block for 1D convolution over a 4-channel DNA input.
-    For simplicity, we:
-      - Use two consecutive (Conv -> BN -> ReLU) operations.
-      - Optionally apply a 1x1 Conv in the skip path if in/out channels differ.
-      - Keep stride=1 to preserve spatial dimension, then handle downsampling
-        via MaxPool2d outside of this block.
-    """
-
-    def __init__(self, in_channels, out_channels, kernel_size):
-        super().__init__()
-        self.conv1 = Conv2d(
-            in_channels, out_channels, kernel_size=kernel_size, padding="same"
-        )
-        self.bn1 = BatchNorm2d(out_channels)
-        self.relu = ReLU(inplace=True)
-        self.conv2 = Conv2d(
-            out_channels, out_channels, kernel_size=kernel_size, padding="same"
-        )
-        self.bn2 = BatchNorm2d(out_channels)
-
-        # If the input and output channel counts differ, adjust skip path
-        self.skip_conv = None
-        if in_channels != out_channels:
-            self.skip_conv = nn.Sequential(
-                Conv2d(in_channels, out_channels, kernel_size=1),
-                BatchNorm2d(out_channels),
-            )
-
-    def forward(self, x):
-        skip = x
-        # Adjust skip path if needed
-        if self.skip_conv is not None:
-            skip = self.skip_conv(skip)
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-
-        # Add skip connection
-        out = out + skip
-        out = self.relu(out)
-        return out
-
-
 class CNN_STARR(nn.Module):
     def __init__(self):
         super().__init__()
-        self.model = Sequential(
-            ResidualBlock(in_channels=4, out_channels=128, kernel_size=(1, 19)),
-            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
-            #
-            ResidualBlock(in_channels=128, out_channels=256, kernel_size=(1, 15)),
-            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
-            #
-            ResidualBlock(in_channels=256, out_channels=512, kernel_size=(1, 11)),
-            MaxPool2d(kernel_size=(1, 2), stride=(1, 2)),
-            #
-            AdaptiveAvgPool2d((1, 1)),
+
+        # 1) The CNN backbone with some convs, BN, etc.
+        #    We'll do smaller kernels here just for the example.
+        #    Also note the final AdaptiveAvgPool2d to shrink to (1,1).
+        self.backbone = Sequential(
+            Conv2d(4, 128, kernel_size=(1, 11), padding="same"),
+            BatchNorm2d(128),
+            ReLU(),
+            MaxPool2d((1, 2), (1, 2)),
+            Conv2d(128, 256, kernel_size=(1, 9), padding="same"),
+            BatchNorm2d(256),
+            ReLU(),
+            MaxPool2d((1, 2), (1, 2)),
+            Conv2d(256, 512, kernel_size=(1, 7), padding="same"),
+            BatchNorm2d(512),
+            ReLU(),
+            MaxPool2d((1, 2), (1, 2)),
+            # AdaptiveAvgPool2d((1, 8)),
             Flatten(),
-            #
-            Linear(512, 1024),
+        )
+
+        # After adaptive pooling, the shape is [batch, 512, 1, 1].
+        # Flatten to [batch, 512].
+        # So the next input dimension is 512.
+        self.head = Sequential(
+            # Linear(512 * 8, 1024),
+            Linear(65536, 1024),
             BatchNorm1d(1024),
             ReLU(),
             Dropout(0.4),
-            #
             Linear(1024, 1024),
             BatchNorm1d(1024),
             ReLU(),
             Dropout(0.4),
-            #
             Linear(1024, 1),
         )
 
+    def forward_backbone_only(self, x):
+        z = self.backbone(x)  # shape [batch, 512, 1, 1]
+        z = z.view(z.size(0), -1)  # flatten to [batch, 512]
+        return z
+
     def forward(self, x_input):
-        return self.model(x_input)
+        """
+        The main forward pass:
+        1) get embedding forward,
+        2) get embedding RC,
+        3) combine,
+        4) feed to head
+        """
+        # If you prefer to pool embeddings before the final head:
+        embed_fwd = self.forward_backbone_only(x_input)
+        embed_rc = self.forward_backbone_only(reverse_complement(x_input))
+        embed_merged = embed_fwd + embed_rc
+        out = self.head(embed_merged)
+        return out
 
 
 cnn_starr = CNN_STARR()
 # print(cnn_starr)
-summary(cnn_starr, input_size=(4, 1, 1000), batch_size=128)
-_ = cnn_starr.to(device)
+summary(cnn_starr, input_size=(4, 1, 1024), batch_size=128)
+cnn_starr = cnn_starr.to(device)
+sum(p.numel() for p in cnn_starr.parameters())
 
 
 # %% [markdown]
@@ -504,13 +505,26 @@ def summmary_statistic(set_name, dataloader, main_model, task):
 # Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
 dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.csv.gz")
 
+# %%
+df = dfe[dfe.RevComp == 0]
+df
+
+# %%
+data = np.load(dbmrd / "shapes.npz")
+data
+
+# %%
+data["mgw"]
+
 # %% [markdown]
 # ### Split data from training
 
 # %%
 # Small sample for testing code
 # df = dfe.sample(n=100_000, random_state=random_state)
-df = dfe
+# df = dfe
+df = dfe[dfe.RevComp == 0]
+# df = dfe.sample(frac=0.10, random_state=random_state)
 
 df_train, df_tmp = train_test_split(df, test_size=0.10, random_state=random_state)
 df_val, df_test = train_test_split(df_tmp, test_size=0.50, random_state=random_state)
@@ -522,24 +536,21 @@ df_train
 # ### Run the pipline
 
 # %%
-# Initial model: train_loss: 0.11603, valid_loss 0.16997
-
-# %%
 # Tests on macOS M1 Pro
 # batch_size = 32  # 720s+/epoch
-batch_size = 256  # 454s/epoch
+# batch_size = 256  # 454s/epoch
 # batch_size = 512  # 455s/epoch, just uses more RAM
-# batch_size = 128  # 500s/epoch
+batch_size = 128  # 500s/epoch
 
 epochs = 100
-patience = 10
+patience = 5
 
 task = "NSC"
 
-fp = dbmt / f"checkpoint_{task}.pth"
+# fp = dbmt / f"checkpoint_{task}.pth"
 # load the previously trained model to continue the training
-if fp.is_file():
-    cnn_starr.load_state_dict(torch.load(fp))
+# if fp.is_file():
+#     cnn_starr.load_state_dict(torch.load(fp))
 
 # create data
 train_dataloader = create_dataset(df_train, batch_size, task)
@@ -570,56 +581,3 @@ loss_fig(train_loss, valid_loss, task)
 # summmary_statistic("Train", train_dataloader, cnn_starr, task)
 # summmary_statistic("Valid", valid_dataloader, cnn_starr, task)
 # summmary_statistic("Test", test_dataloader, cnn_starr, task)
-
-# %% [raw]
-# def combine_df(cell, set):
-#     file_seq = str(
-#         "/data/scratch/rdeng/enhancer_project/data/train_set/Sequences_" + set + ".fa"
-#     )
-#     input_fasta = IOHelper.get_fastas_from_file(file_seq, uppercase=True)
-#
-#     targets = np.load(
-#         "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/targets_"
-#         + cell
-#         + "_"
-#         + set
-#         + ".npy"
-#     )
-#     preds = np.load(
-#         "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/preds_"
-#         + cell
-#         + "_"
-#         + set
-#         + ".npy"
-#     )
-#     DF_targets = pd.DataFrame(targets)
-#     DF_preds = pd.DataFrame(preds)
-#
-#     DF_merged = pd.concat([input_fasta, DF_targets, DF_preds], axis=1)
-#     DF_merged.columns = ["location", "sequence", "targets", "preds"]
-#
-#     DF_merged = DF_merged[~DF_merged.location.str.contains("Reversed")]
-#
-#     return DF_merged
-
-# %% [raw]
-# test_nsc = combine_df("ESC", "Test")
-# valid_nsc = combine_df("ESC", "Valid")
-# train_nsc = combine_df("ESC", "Train")
-# whole_nsc = pd.concat([test_nsc, valid_nsc, train_nsc], axis=0)
-#
-# whole_nsc = whole_nsc[["location", "targets", "preds"]]
-# whole_nsc.to_csv(
-#     "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/preds_targets/whole_ESC.csv",
-#     index=False,
-# )
-# # whole_nsc[['location','start']] = whole_nsc['location'].str.split(':',expand=True)
-# # whole_nsc[['start','end']] = whole_nsc['start'].str.split('-',expand=True)
-#
-#
-# # whole_nsc = whole_nsc.sort_values(by=['location', 'start'], ascending=[True, True])
-# # whole_nsc = whole_nsc[['location', 'start', 'end', 'targets', 'preds']]
-
-# %%
-
-# %%
