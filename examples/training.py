@@ -81,7 +81,7 @@ def to_uint8(string):
 
 
 # function to convert only one piece of sequence to np.array
-def make_one_hot_encode(alphabet: str = "ACGT", dtype=np.int8) -> np.ndarray:
+def make_one_hot_encode(alphabet: str = "ACGT", dtype=np.float32) -> np.ndarray:
     """
     One-hot encode for a sequence.
     A -> [1,0,0,0]
@@ -107,7 +107,7 @@ def pad_arr(snippet: np.ndarray, arr_pre: int = 1024):
     assert len(snippet) <= arr_pre, len(snippet)
     arr_len = len(snippet)
     pad = (arr_pre - arr_len) / 2
-    return np.pad(snippet, [(int(pad), math.ceil(pad)), (0, 0)], mode="constant")
+    return np.pad(snippet, [(int(pad), math.ceil(pad)), (0.0, 0.0)], mode="constant")
 
 
 seq = "ACGTATCnotdna"
@@ -121,33 +121,14 @@ to_uint8(seq), one_hot_encode(seq)
 # %%
 # function to generate all sequences to np.array (one-hot encoding matrix)
 def generate_sequence_matrix(sequences):
-    """
-    After the function of one_hot_encode,
-    convert the whole dataset to one_hot encoding matrix
-    """
     sequence_matrix = []
     for seq in sequences:
         snippet = one_hot_encode(seq)
         sequence_matrix.append(pad_arr(snippet))
-    return np.array(sequence_matrix)
+    return np.array(sequence_matrix, dtype=np.float32)
 
 
-def prepare_tensor(X, Y):
-    """
-    convert np.array to tensor
-    """
-    # convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
-    tensor_x = torch.Tensor(X).permute(0, 2, 1).unsqueeze(2)
-    # add one dimension in targets: [batch] -> [batch, 1]
-    tensor_y = torch.Tensor(Y).unsqueeze(1)
-    return TensorDataset(tensor_x, tensor_y)
-
-
-def create_dataset(df: pd.DataFrame, batch_size: int, task: str):
-    """
-    Load sequences and enhancer activity,
-    convert to tensor type as the input of model
-    """
+def create_dataloader(df: pd.DataFrame, batch_size: int, task: str):
     assert task in ("NSC", "ESC"), task
     Y = df[f"{task}_log2_enrichment"].values
 
@@ -158,14 +139,18 @@ def create_dataset(df: pd.DataFrame, batch_size: int, task: str):
     X = np.nan_to_num(seq_matrix)
     X_reshaped = X.reshape((X.shape[0], X.shape[1], X.shape[2]))
 
-    tensor_data = prepare_tensor(X_reshaped, Y)
+    # convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
+    tensor_x = torch.Tensor(X_reshaped).permute(0, 2, 1).unsqueeze(2)
+    # add one dimension in targets: [batch] -> [batch, 1]
+    tensor_y = torch.Tensor(Y).unsqueeze(1)
+    tensor_data = TensorDataset(tensor_x, tensor_y)
 
     return DataLoader(tensor_data, batch_size)
 
 
 def reverse_complement(x):
     """
-    x: A tensor of shape (batch, 4, 1, L)
+    x: A tensor of shape (batch, 4, 1, seq_len)
        channel 0 = A, channel 1 = C, channel 2 = G, channel 3 = T.
     Returns the reverse-complement version of x (same shape).
     """
@@ -250,10 +235,6 @@ class EarlyStopping:
 class CNN_STARR(nn.Module):
     def __init__(self):
         super().__init__()
-
-        # 1) The CNN backbone with some convs, BN, etc.
-        #    We'll do smaller kernels here just for the example.
-        #    Also note the final AdaptiveAvgPool2d to shrink to (1,1).
         self.backbone = Sequential(
             Conv2d(4, 128, kernel_size=(1, 11), padding="same"),
             BatchNorm2d(128),
@@ -270,10 +251,6 @@ class CNN_STARR(nn.Module):
             # AdaptiveAvgPool2d((1, 8)),
             Flatten(),
         )
-
-        # After adaptive pooling, the shape is [batch, 512, 1, 1].
-        # Flatten to [batch, 512].
-        # So the next input dimension is 512.
         self.head = Sequential(
             # Linear(512 * 8, 1024),
             Linear(65536, 1024),
@@ -293,14 +270,6 @@ class CNN_STARR(nn.Module):
         return z
 
     def forward(self, x_input):
-        """
-        The main forward pass:
-        1) get embedding forward,
-        2) get embedding RC,
-        3) combine,
-        4) feed to head
-        """
-        # If you prefer to pool embeddings before the final head:
         embed_fwd = self.forward_backbone_only(x_input)
         embed_rc = self.forward_backbone_only(reverse_complement(x_input))
         embed_merged = embed_fwd + embed_rc
@@ -309,7 +278,6 @@ class CNN_STARR(nn.Module):
 
 
 cnn_starr = CNN_STARR()
-# print(cnn_starr)
 summary(cnn_starr, input_size=(4, 1, 1024), batch_size=128)
 cnn_starr = cnn_starr.to(device)
 sum(p.numel() for p in cnn_starr.parameters())
@@ -503,18 +471,14 @@ def summmary_statistic(set_name, dataloader, main_model, task):
 
 # %%
 # Generated with get_seqs_from_hg38.R based on Enhancer_activity.txt
-dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq_aug.csv.gz")
+dfe = pd.read_csv(dbmrd / "Enhancer_activity_w_seq.csv.gz")
 
 # %%
-df = dfe[dfe.RevComp == 0]
-df
+dfe
 
 # %%
 data = np.load(dbmrd / "shapes.npz")
 data
-
-# %%
-data["mgw"]
 
 # %% [markdown]
 # ### Split data from training
@@ -522,8 +486,7 @@ data["mgw"]
 # %%
 # Small sample for testing code
 # df = dfe.sample(n=100_000, random_state=random_state)
-# df = dfe
-df = dfe[dfe.RevComp == 0]
+df = dfe
 # df = dfe.sample(frac=0.10, random_state=random_state)
 
 df_train, df_tmp = train_test_split(df, test_size=0.10, random_state=random_state)
@@ -538,19 +501,14 @@ df_train
 # %%
 # Tests on macOS M1 Pro
 # batch_size = 32  # 720s+/epoch
-# batch_size = 256  # 454s/epoch
+# batch_size = 128  # 500s/epoch
+batch_size = 256  # 454s/epoch, uses more RAM
 # batch_size = 512  # 455s/epoch, just uses more RAM
-batch_size = 128  # 500s/epoch
 
 epochs = 100
 patience = 5
 
 task = "NSC"
-
-# fp = dbmt / f"checkpoint_{task}.pth"
-# load the previously trained model to continue the training
-# if fp.is_file():
-#     cnn_starr.load_state_dict(torch.load(fp))
 
 # create data
 train_dataloader = create_dataset(df_train, batch_size, task)
