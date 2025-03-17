@@ -39,6 +39,9 @@ dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
 
 # %%
+tqdm(range(1000))
+
+# %%
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
@@ -148,7 +151,7 @@ def reverse_complement(x):
     return x_revcomp
 
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true
+# %% [markdown]
 # ### Define EarlyStopping class
 
 
@@ -216,7 +219,7 @@ class EarlyStopping:
 
 # %%
 class CNN_STARR(nn.Module):
-    def __init__(self, revcomp: bool = False):
+    def __init__(self, revcomp: bool = True):
         super().__init__()
         self.revcomp = revcomp
         self.backbone = Sequential(
@@ -232,11 +235,11 @@ class CNN_STARR(nn.Module):
             BatchNorm2d(512),
             ReLU(),
             MaxPool2d((1, 2), (1, 2)),
-            AdaptiveAvgPool2d((1, 8)),
+            AdaptiveAvgPool2d((1, 16)),
             # Flatten(),
         )
         self.head = Sequential(
-            Linear(512 * 8, 1024),
+            Linear(512 * 16, 1024),
             # Linear(65536, 1024),
             BatchNorm1d(1024),
             ReLU(),
@@ -257,7 +260,7 @@ class CNN_STARR(nn.Module):
         embed_fwd = self.forward_backbone_only(x_input)
         if self.revcomp:
             embed_rc = self.forward_backbone_only(reverse_complement(x_input))
-            embed_merged = embed_fwd + embed_rc
+            embed_merged = (embed_fwd + embed_rc) / 2
         else:
             embed_merged = embed_fwd
         out = self.head(embed_merged)
@@ -389,8 +392,8 @@ usecols = [
     "Chr",
     "Start",
     "End",
-    "NSC_log2_enrichment",
-    # "ESC_log2_enrichment",
+    # "NSC_log2_enrichment",
+    "ESC_log2_enrichment",
     "Seq",
     # "SeqRevComp",
 ]
@@ -404,7 +407,7 @@ for c in ("Seq",):
     dfe[f"{c}Enc"] = dfe[c].map(one_hot_encode).map(pad_arr)
 
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true
+# %% [markdown]
 # #### DNA shape data
 
 # %% [raw]
@@ -422,7 +425,7 @@ for c in ("Seq",):
 # print(seqs.shape)
 # del seqs, data
 
-# %% [markdown] jp-MarkdownHeadingCollapsed=true
+# %% [markdown]
 # #### Coupled DNA encoded sequence & DNA shape
 
 # %% [raw]
@@ -461,12 +464,15 @@ def bins(s):
     return pd.cut(np.log2(s + 1), bins=8, labels=False)
 
 
+task = "ESC"
+col_y = f"{task}_log2_enrichment"
+
 # Global sample for quicker tests
 # _, df = train_test_split(
 #     dfe,
 #     test_size=0.30,
 #     random_state=random_state,
-#     stratify=bins(dfe.NSC_log2_enrichment),
+#     stratify=bins(dfe[col_y]),
 # )
 
 df = dfe
@@ -476,14 +482,14 @@ df_train, df = train_test_split(
     df,
     test_size=0.10,
     random_state=random_state,
-    stratify=bins(df.NSC_log2_enrichment),
+    stratify=bins(df[col_y]),
 )
 
 df_val, df_test = train_test_split(
     df,
     test_size=0.50,
     random_state=random_state,
-    stratify=bins(df.NSC_log2_enrichment),
+    stratify=bins(df[col_y]),
 )
 
 del df
@@ -499,14 +505,11 @@ batch_size = 256  # 454s/epoch, uses more RAM
 # batch_size = 512  # 455s/epoch, just uses more RAM
 
 epochs = 100
-patience = 20
-
-task = "NSC"
+patience = 10
 
 col_x = "SeqEnc"
 # col_x = "SeqShapes"
 # col_x = "SeqAndShapes"
-col_y = f"{task}_log2_enrichment"
 
 # create data
 train_dataloader = create_dataloader(
@@ -610,11 +613,47 @@ def summmary_statistic(set_name, dataloader, main_model, task):
 # plot Train and Valid loss
 loss_fig(train_loss, valid_loss, task)
 
+# %% [markdown]
+# # Performance summary
+
+# %%
+test_dataloader = create_dataloader(
+    x=df_test[col_x],
+    y=df_test[col_y],
+    batch_size=batch_size,
+)
+# summary statistics
+# cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth".format(task), map_location=torch.device('cpu')))
+summmary_statistic("Train", train_dataloader, cnn_starr, task)
+summmary_statistic("Valid", valid_dataloader, cnn_starr, task)
+summmary_statistic("Test", test_dataloader, cnn_starr, task)
+
 # %% [raw]
-# test_dataloader = create_dataset(df_test, batch_size, task)
-#
-# # summary statistics
-# # cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth".format(task), map_location=torch.device('cpu')))
-# summmary_statistic("Train", train_dataloader, cnn_starr, task)
-# summmary_statistic("Valid", valid_dataloader, cnn_starr, task)
-# summmary_statistic("Test", test_dataloader, cnn_starr, task)
+# checkpoint_NSC_t16433_v17003_s100_revcomp_avg_polling16.pth
+# ---------Summary on Train data---------
+# the MSE of NSC: 0.16155
+# the pearson r of NSC: 0.44630
+# the spearman r of NSC: 0.44546
+# ---------Summary on Valid data---------
+# the MSE of NSC: 0.17002
+# the pearson r of NSC: 0.40641
+# the spearman r of NSC: 0.42084
+# ---------Summary on Test data---------
+# the MSE of NSC: 0.16618
+# the pearson r of NSC: 0.42796
+# the spearman r of NSC: 0.44082
+
+# %% [raw]
+# checkpoint_ESC_t13336_v13242_s100_revcomp_avg_polling1.pth
+# ---------Summary on Train data---------
+# the MSE of ESC: 0.12647
+# the pearson r of ESC: 0.74991
+# the spearman r of ESC: 0.74448
+# ---------Summary on Valid data---------
+# the MSE of ESC: 0.12918
+# the pearson r of ESC: 0.74431
+# the spearman r of ESC: 0.73749
+# ---------Summary on Test data---------
+# the MSE of ESC: 0.12890
+# the pearson r of ESC: 0.74692
+# the spearman r of ESC: 0.73565
