@@ -191,7 +191,7 @@ class EarlyStopping:
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, task)
+            self.save_checkpoint(val_loss, model, self.task)
         elif score < self.best_score + self.delta:
             self.counter += 1
             msg = f"EarlyStopping {self.counter = } out of {self.patience = }"
@@ -200,7 +200,7 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model, task)
+            self.save_checkpoint(val_loss, model, self.task)
             self.counter = 0
 
     def save_checkpoint(self, val_loss, model, task):
