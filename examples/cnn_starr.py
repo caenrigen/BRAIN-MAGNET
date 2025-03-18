@@ -14,32 +14,28 @@ class CNNSTARR(L.LightningModule):
         self.loss_fn = nn.MSELoss()
 
         self.backbone = nn.Sequential(
-            nn.Conv2d(4, 64, kernel_size=(1, 11), padding="same"),
+            nn.Conv2d(4, 32, kernel_size=(1, 11), padding="same"),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 2), (1, 2)),
+            nn.Dropout(0.2),
+            nn.Conv2d(32, 64, kernel_size=(1, 9), padding="same"),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.2),
-            nn.Conv2d(64, 128, kernel_size=(1, 9), padding="same"),
+            nn.Conv2d(64, 128, kernel_size=(1, 7), padding="same"),
             nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Dropout(0.2),
-            nn.Conv2d(128, 256, kernel_size=(1, 7), padding="same"),
-            nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.head = nn.Sequential(
-            nn.Linear(256, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(256, 1),
+            nn.Dropout(0.4),
+            nn.Linear(64, 1),
         )
 
     def forward_backbone(self, x):
