@@ -14,3 +14,4 @@ jupyter-autotime
 jupyter-black
 tqdm
 ipywidgets # for tqdm in Jupyter Lab
+standard-imghdr # imghdr was removed from python3.13
