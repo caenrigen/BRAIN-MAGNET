@@ -66,7 +66,7 @@ device
 
 task = "ESC"
 
-model = CNNSTARR(lr=0.001, weight_decay=0, revcomp=True, log_vars_prefix=task)
+model = CNNSTARR(lr=0.005, weight_decay=0, revcomp=True, log_vars_prefix=task)
 model.to(device)
 
 fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
