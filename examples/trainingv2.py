@@ -64,9 +64,9 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-task = "ESC"
+task = "NSC"
 
-model = CNNSTARR(lr=0.005, weight_decay=0, revcomp=True, log_vars_prefix=task)
+model = CNNSTARR(lr=0.005, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
 model.to(device)
 
 fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
@@ -75,7 +75,7 @@ data_loader = DMSTARR(fp=fp, sample=None, y_col=f"{task}_log2_enrichment")
 early_stop = EarlyStopping(
     monitor=f"{task}_loss_val",
     min_delta=0.001,
-    patience=20,
+    patience=30,
     verbose=True,
     mode="min",
 )
