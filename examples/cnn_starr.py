@@ -81,6 +81,9 @@ class CNNSTARR(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, suffix="val")
 
+    def test_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, suffix="test")
+
     def configure_optimizers(self):
         return torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=self.weight_decay

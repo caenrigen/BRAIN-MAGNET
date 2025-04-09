@@ -43,7 +43,7 @@ class DMSTARR(L.LightningDataModule):
             "Seq",
             # "SeqRevComp",
         ]
-        df = pd.read_csv(fp, usecols=usecols)
+        df = pd.read_csv(self.fp, usecols=usecols)
         df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_arr)
 
         if self.sample:
@@ -76,7 +76,7 @@ class DMSTARR(L.LightningDataModule):
             self.ds_train = func(df=self.df_train)
             self.ds_val = func(df=self.df_val)
         elif stage == "test":
-            self.ds_test = func(df=self.df_ts)
+            self.ds_test = func(df=self.df_test)
         else:
             raise NotImplementedError(f"{stage = }")
 
@@ -87,4 +87,4 @@ class DMSTARR(L.LightningDataModule):
         return DataLoader(self.ds_val, batch_size=self.batch_size, shuffle=False)
 
     def test_dataloader(self):
-        return DataLoader(self.ds_val, batch_size=self.batch_size, shuffle=False)
+        return DataLoader(self.ds_test, batch_size=self.batch_size, shuffle=False)
