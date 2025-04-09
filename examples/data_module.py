@@ -1,3 +1,15 @@
+import lightning as L
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+from functools import partial
+from pathlib import Path
+from typing import Optional
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import KFold, StratifiedKFold
+
+
 def bins(s):
     # Can't do less bins AND have enough elements in each bin
     # There are several "outliers" in the NCREs activity,
@@ -22,6 +34,8 @@ class DMSTARR(L.LightningDataModule):
         sample: Optional[int] = None,
         batch_size: int = 256,
         random_state: int = 913,
+        n_folds: Optional[int] = None,  # Number of folds for cross-validation
+        fold_idx: int = 0,  # Current fold index (0 to n_folds-1)
     ):
         super().__init__()
         self.fp = fp
@@ -31,6 +45,10 @@ class DMSTARR(L.LightningDataModule):
         self.ds_train = self.ds_val = self.ds_test = None
         self.batch_size = batch_size
         self.random_state = random_state
+        if n_folds is not None and fold_idx >= n_folds:
+            raise ValueError(f"{fold_idx = } must be less than {n_folds = }")
+        self.n_folds = n_folds
+        self.fold_idx = fold_idx
 
     def prepare_data(self):
         usecols = [
@@ -56,12 +74,25 @@ class DMSTARR(L.LightningDataModule):
 
         self.df = df
 
-        df, self.df_test = train_test_split(
-            df,
-            test_size=0.10,
-            random_state=self.random_state,
-            stratify=bins(df[self.y_col]),
-        )
+        if self.n_folds is None:
+            df, self.df_test = train_test_split(
+                df,
+                test_size=0.10,
+                random_state=self.random_state,
+                stratify=bins(df[self.y_col]),
+            )
+        else:
+            kf = StratifiedKFold(
+                n_splits=self.n_folds, shuffle=True, random_state=self.random_state
+            )
+            for i, (df_idxs, test_idxs) in enumerate(
+                kf.split(df, bins(df[self.y_col]))
+            ):
+                if i == self.fold_idx:
+                    assert len(test_idxs) < len(df_idxs)
+                    self.df_test = df.iloc[test_idxs]
+                    df = df.iloc[df_idxs]
+                    break
 
         self.df_train, self.df_val = train_test_split(
             df,

@@ -1,3 +1,10 @@
+from pathlib import Path
+
+import lightning as L
+import torch
+from torch import nn
+
+
 class CNNSTARR(L.LightningModule):
     def __init__(
         self,
@@ -88,3 +95,19 @@ class CNNSTARR(L.LightningModule):
         return torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
+
+
+class ThresholdCheckpoint(L.Callback):
+    def __init__(self, threshold: float = 0.14, task: str = "ESC"):
+        super().__init__()
+        self.threshold = threshold
+        self.task = task
+
+    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module):
+        val_loss = trainer.callback_metrics.get(f"{self.task}_loss_val")
+        if val_loss is not None and val_loss <= self.threshold:
+            checkpoint_dir = Path(trainer.logger.log_dir) / "threshold_checkpoints"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            fn = f"{self.task}_vloss{int(val_loss * 1000):d}_ep{trainer.current_epoch}.pt"
+            fp = checkpoint_dir / fn
+            torch.save(pl_module.state_dict(), fp)

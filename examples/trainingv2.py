@@ -8,15 +8,20 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.14.5
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: Python3.13 (Remote MacBook Pro)
 #     language: python
-#     name: python3
+#     name: ssh_mbp_ext
 # ---
 
 # %%
-# %load_ext jupyter_black
-# %load_ext autotime
+# cd sshpyk_code/examples
 
+# %%
+import time
+from tqdm.auto import tqdm
+
+for _ in tqdm(range(10)):
+    time.sleep(0.1)
 
 # %%
 import numpy as np
@@ -37,17 +42,20 @@ from functools import partial
 import lightning as L
 import torch
 from torch import nn
+import gc
 from torch.utils.data import DataLoader, TensorDataset
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from torch.utils.tensorboard import SummaryWriter
+from random import randbytes
 
 # %%
 random_state = 913
-random.seed(random_state)
+# random.seed(random_state)
 
-dbm = Path("/Volumes/Famafia/brain-magnet/")
+dbmc = Path("/Users/victor/sshpyk_code")
+dbm = Path("/Users/victor/sshpyk_data/")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
 
@@ -58,33 +66,67 @@ print(torch.cuda.is_available(), torch.backends.mps.is_available())
 device = torch.device("mps")  # might have priblems for macOS <14.0
 device
 
+# %% [raw] vscode={"languageId": "raw"}
+# - 347bc336: lr=0.001, weight_decay=1e-6, dropout=0.1
+# - 288fa45b: lr=0.0005, weight_decay=1e-6, dropout=0.1
+# - 3dc19952: lr=0.0001, weight_decay=1e-6, dropout=0.1
+
 # %%
 # Evaluate the python files within the notebook namespace
 # %run -i auxiliar.py
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-task = "NSC"
+task = "ESC"
 
-model = CNNSTARR(lr=0.005, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
-model.to(device)
+version = randbytes(4).hex()
 
-fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
-data_loader = DMSTARR(fp=fp, sample=None, y_col=f"{task}_log2_enrichment")
+n_folds = 5
+for fold_idx in tqdm(range(n_folds), desc="Folds"):
+    model = CNNSTARR(lr=0.0001, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
+    model.to(device)
 
-early_stop = EarlyStopping(
-    monitor=f"{task}_loss_val",
-    min_delta=0.001,
-    patience=30,
-    verbose=True,
-    mode="min",
-)
+    fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
+    data_loader = DMSTARR(
+        fp=fp,
+        sample=None,
+        y_col=f"{task}_log2_enrichment",
+        n_folds=n_folds,
+        fold_idx=fold_idx,
+    )
 
-logger = TensorBoardLogger(dbmt, name=f"starr_{task}")
-trainer = L.Trainer(
-    max_epochs=100,
-    logger=logger,
-    callbacks=[early_stop],
-)
+    # early_stop = EarlyStopping(
+    #     monitor=f"{task}_loss_val",
+    #     min_delta=0.001,
+    #     patience=20,
+    #     verbose=True,
+    #     mode="min",
+    #     check_on_train_epoch_end=False,
+    # )
 
-trainer.fit(model, data_loader)  # run training
+    logger = TensorBoardLogger(
+        dbmt,
+        name=f"starr_{task}",
+        version=version,
+        sub_dir=f"fold_{fold_idx}",
+    )
+    trainer = L.Trainer(
+        max_epochs=70,
+        logger=logger,
+        # callbacks=[early_stop],
+        callbacks=[ThresholdCheckpoint(threshold=0.14, task=task)],
+    )
+
+    try:
+        trainer.fit(model, data_loader)  # run training
+    except (KeyboardInterrupt, NameError):
+        print("Training interrupted by user")
+        break
+
+    # test_result = trainer.test(model, data_loader)[0]
+    # results.append(test_result)
+
+    del model, data_loader, logger, trainer
+    gc.collect()
+
+# %%
