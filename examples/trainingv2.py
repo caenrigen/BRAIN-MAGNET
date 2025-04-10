@@ -77,7 +77,12 @@ device
 # - e7dcf63e: lr=0.01, weight_decay=5e-6, dropout=0.1
 # - 91f17bcc: lr=0.01, weight_decay=2e-6, dropout=0.1
 # - c92d9749: lr=0.01, weight_decay=1e-6, dropout=0.1, 0.05, 64->32 head
-# - 2ae21203: lr=0.01, weight_decay=1e-6, dropout=0.1, 0.1, 64->32
+# - 2ae21203: lr=0.01, weight_decay=1e-6, dropout=0.1, 64->32
+# - a3604d58: lr=0.01, weight_decay=1e-6, dropout=0.1, 32->16 all
+# - ebd0e997: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13), ...)
+# - af2f90f7: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15), ...), 11(?), 9(?)
+# - 674707d4: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13), ...), 9, 7
+#
 
 # %%
 # Evaluate the python files within the notebook namespace

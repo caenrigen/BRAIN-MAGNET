@@ -21,33 +21,33 @@ class CNNSTARR(L.LightningModule):
         self.loss_fn = nn.MSELoss()
 
         self.backbone = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=(1, 11), padding="same"),
+            nn.Conv2d(4, 32, kernel_size=(1, 13), padding="same"),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d((1, 2), (1, 2)),
+            nn.Dropout(0.1),
+            nn.Conv2d(32, 16, kernel_size=(1, 9), padding="same"),
             nn.BatchNorm2d(16),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
-            nn.Conv2d(16, 32, kernel_size=(1, 9), padding="same"),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Dropout(0.1),
-            nn.Conv2d(32, 32, kernel_size=(1, 7), padding="same"),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(16, 16, kernel_size=(1, 7), padding="same"),
+            nn.BatchNorm2d(16),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
             nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.head = nn.Sequential(
-            nn.Linear(32, 32),
-            nn.BatchNorm1d(32),
+            nn.Linear(16, 16),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(32, 32),
-            nn.BatchNorm1d(32),
+            nn.Linear(16, 16),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(32, 1),
+            nn.Linear(16, 1),
         )
 
     def forward_backbone(self, x):
