@@ -26,10 +26,26 @@ def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str):
     return TensorDataset(tensor_x, tensor_y)
 
 
+def load_enrichment_data(fp: Path, y_col: str = "NSC_log2_enrichment"):
+    usecols = [
+        # "Chr",
+        # "Start",
+        # "End",
+        # "NSC_log2_enrichment",
+        # "ESC_log2_enrichment",
+        y_col,
+        "Seq",
+        # "SeqRevComp",
+    ]
+    df = pd.read_csv(fp, usecols=usecols)
+    df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_arr)
+    return df
+
+
 class DMSTARR(L.LightningDataModule):
     def __init__(
         self,
-        fp: Path,
+        df_enrichment: pd.DataFrame,
         y_col: str = "NSC_log2_enrichment",
         sample: Optional[int] = None,
         batch_size: int = 256,
@@ -39,7 +55,7 @@ class DMSTARR(L.LightningDataModule):
         augment: int = 0,
     ):
         super().__init__()
-        self.fp = fp
+        self.df_enrichment = df_enrichment
         self.y_col = y_col
         self.sample = sample  # for quick code tests with small data sample
         self.df = self.df_train = self.df_val = self.df_test = None
@@ -52,29 +68,18 @@ class DMSTARR(L.LightningDataModule):
         self.fold_idx = fold_idx
         self.augment = augment
 
-    def prepare_data(self):
-        usecols = [
-            # "Chr",
-            # "Start",
-            # "End",
-            # "NSC_log2_enrichment",
-            # "ESC_log2_enrichment",
-            self.y_col,
-            "Seq",
-            # "SeqRevComp",
-        ]
-        df = pd.read_csv(self.fp, usecols=usecols)
-        df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_arr)
+        assert y_col in df_enrichment.columns
 
+    def prepare_data(self):
         if self.sample:
             _, df = train_test_split(
-                df,
+                self.df_enrichment,
                 test_size=self.sample,
                 random_state=self.random_state,
-                stratify=bins(df[self.y_col]),
+                stratify=bins(self.df_enrichment[self.y_col]),
             )
-
-        self.df = df
+        else:
+            df = self.df_enrichment
 
         if self.n_folds is None:
             df, self.df_test = train_test_split(
@@ -108,6 +113,13 @@ class DMSTARR(L.LightningDataModule):
                 num_shits=self.augment,
                 random_state=self.random_state,
             )
+
+    def make_dl(self, df: pd.DataFrame):
+        return DataLoader(
+            make_tensor_dataset(df=df, x_col="SeqEnc", y_col=self.y_col),
+            batch_size=self.batch_size,
+            shuffle=True,
+        )
 
     def setup(self, stage: Optional[str] = None):
         func = partial(make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col)

@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.14.5
 #   kernelspec:
-#     display_name: Python3.13 (Remote MacBook Pro)
+#     display_name: Python 3.13 (RMBP+SSHFS)
 #     language: python
 #     name: ssh_mbp_ext
 # ---
@@ -86,6 +86,10 @@ device
 # - 6adb5711: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15/13/11), ...)
 # - a5ffba4d: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 17/15/13), ...)
 # - cd8eaa74: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13/11/9), ...)
+# ---
+# - 2b336432: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15/13/11), ...)
+# - f219f565: 2b336432 but with augment=4
+# - a8e7dd9b: f219f565 but with augment=8
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -93,32 +97,39 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-task = "ESC"
+# task = "ESC"
+# threshold = 0.14
+task = "NSC"
+threshold = 0.17
 
+# %%
+# %run -i auxiliar.py
+# %run -i cnn_starr.py
+# %run -i data_module.py
+df_enrichment = load_enrichment_data(
+    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=f"{task}_log2_enrichment"
+)
+
+# %%
 version = randbytes(4).hex()
+# version = "f219f565"
 n_folds = 5
 
 for fold_idx in tqdm(range(n_folds), desc="Folds"):
+    # if fold_idx == 0:
+    #     continue
     model = CNNSTARR(lr=0.01, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
     model.to(device)
 
     fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
     data_loader = DMSTARR(
-        fp=fp,
+        df_enrichment=df_enrichment,
         sample=None,
         y_col=f"{task}_log2_enrichment",
         n_folds=n_folds,
         fold_idx=fold_idx,
+        augment=4,
     )
-
-    # early_stop = EarlyStopping(
-    #     monitor=f"{task}_loss_val",
-    #     min_delta=0.001,
-    #     patience=20,
-    #     verbose=True,
-    #     mode="min",
-    #     check_on_train_epoch_end=False,
-    # )
 
     logger = TensorBoardLogger(
         dbmt,
@@ -127,10 +138,10 @@ for fold_idx in tqdm(range(n_folds), desc="Folds"):
         sub_dir=f"fold_{fold_idx}",
     )
     trainer = L.Trainer(
-        max_epochs=70,
+        max_epochs=15,
         logger=logger,
         # callbacks=[early_stop],
-        callbacks=[ThresholdCheckpoint(threshold=0.14, task=task)],
+        callbacks=[ThresholdCheckpoint(threshold=threshold, task=task)],
     )
 
     try:
@@ -143,6 +154,5 @@ for fold_idx in tqdm(range(n_folds), desc="Folds"):
     # results.append(test_result)
 
     del model, data_loader, logger, trainer
-    gc.collect()
 
 # %%
