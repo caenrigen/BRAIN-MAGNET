@@ -70,6 +70,14 @@ device
 # - 347bc336: lr=0.001, weight_decay=1e-6, dropout=0.1
 # - 288fa45b: lr=0.0005, weight_decay=1e-6, dropout=0.1
 # - 3dc19952: lr=0.0001, weight_decay=1e-6, dropout=0.1
+# - 04b9c60f: lr=0.0001, weight_decay=1e-7, dropout=0.1
+# - 86aa4f1d: lr=0.001, weight_decay=5e-6, dropout=0.1
+# - 1fcdfb89: lr=0.005, weight_decay=1e-5, dropout=0.1
+# - ca9be902: lr=0.01, weight_decay=8e-6, dropout=0.1
+# - e7dcf63e: lr=0.01, weight_decay=5e-6, dropout=0.1
+# - 91f17bcc: lr=0.01, weight_decay=2e-6, dropout=0.1
+# - c92d9749: lr=0.01, weight_decay=1e-6, dropout=0.1, 0.05, 64->32 head
+# - 2ae21203: lr=0.01, weight_decay=1e-6, dropout=0.1, 0.1, 64->32
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -80,10 +88,10 @@ device
 task = "ESC"
 
 version = randbytes(4).hex()
-
 n_folds = 5
+
 for fold_idx in tqdm(range(n_folds), desc="Folds"):
-    model = CNNSTARR(lr=0.0001, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
+    model = CNNSTARR(lr=0.01, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
     model.to(device)
 
     fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"

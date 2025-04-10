@@ -31,23 +31,23 @@ class CNNSTARR(L.LightningModule):
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
-            nn.Conv2d(32, 64, kernel_size=(1, 7), padding="same"),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(32, 32, kernel_size=(1, 7), padding="same"),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
             nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.head = nn.Sequential(
-            nn.Linear(64, 64),
-            nn.BatchNorm1d(64),
+            nn.Linear(32, 32),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(64, 64),
-            nn.BatchNorm1d(64),
+            nn.Linear(32, 32),
+            nn.BatchNorm1d(32),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(64, 1),
+            nn.Linear(32, 1),
         )
 
     def forward_backbone(self, x):
