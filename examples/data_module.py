@@ -36,6 +36,7 @@ class DMSTARR(L.LightningDataModule):
         random_state: int = 913,
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
         fold_idx: int = 0,  # Current fold index (0 to n_folds-1)
+        augment: int = 0,
     ):
         super().__init__()
         self.fp = fp
@@ -49,6 +50,7 @@ class DMSTARR(L.LightningDataModule):
             raise ValueError(f"{fold_idx = } must be less than {n_folds = }")
         self.n_folds = n_folds
         self.fold_idx = fold_idx
+        self.augment = augment
 
     def prepare_data(self):
         usecols = [
@@ -100,6 +102,12 @@ class DMSTARR(L.LightningDataModule):
             random_state=self.random_state,
             stratify=bins(df[self.y_col]),
         )
+        if self.augment:
+            self.df_train = augment_data(
+                df_train=self.df_train,
+                num_shits=self.augment,
+                random_state=self.random_state,
+            )
 
     def setup(self, stage: Optional[str] = None):
         func = partial(make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col)
