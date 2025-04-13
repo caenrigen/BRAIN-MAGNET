@@ -12,16 +12,16 @@ class CNNSTARR(L.LightningModule):
         lr: float = 0.01,
         weight_decay: float = 0,
         log_vars_prefix: str = "NSC",
-        forward: Literal["main", "revcomp", "both"] = "main",
+        forward_mode: Literal["main", "revcomp", "both"] = "both",
     ):
         super().__init__()
         self.lr = lr
         self.weight_decay = weight_decay
-        self.forward = forward
+        self.forward_mode = forward_mode
         self.log_vars_prefix = log_vars_prefix
         self.loss_fn = nn.MSELoss()
 
-        self.backbone = nn.Sequential(
+        self.model = nn.Sequential(
             nn.Conv2d(4, 32, kernel_size=(1, 15), padding="same"),
             nn.BatchNorm2d(32),
             nn.ReLU(),
@@ -38,8 +38,7 @@ class CNNSTARR(L.LightningModule):
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
             nn.AdaptiveAvgPool2d((1, 1)),
-        )
-        self.head = nn.Sequential(
+            nn.Flatten(),
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),
@@ -51,23 +50,18 @@ class CNNSTARR(L.LightningModule):
             nn.Linear(16, 1),
         )
 
-    def forward_backbone(self, x):
-        z = self.backbone(x)  # shape [batch, 512, 1, 1]
-        z = z.view(z.size(0), -1)  # flatten to [batch, 512]
-        return z
-
     def forward(self, x):
-        if self.forward == "main":
-            backbone = self.forward_backbone(x)
-        elif self.forward == "revcomp":
-            backbone = self.forward_backbone(tensor_reverse_complement(x))
-        elif self.forward == "both":
-            backbone_fwd = self.forward_backbone(x)
-            backbone_rc = self.forward_backbone(tensor_reverse_complement(x))
-            backbone = (backbone_fwd + backbone_rc) / 2
+        if self.forward_mode == "main":
+            res = self.model(x)
+        elif self.forward_mode == "revcomp":
+            res = self.model(tensor_reverse_complement(x))
+        elif self.forward_mode == "both":
+            res_fwd = self.model(x)
+            res_rc = self.model(tensor_reverse_complement(x))
+            res = (res_fwd + res_rc) / 2  # take the average
         else:
-            raise ValueError(f"{self.forward = }")
-        return self.head(backbone)
+            raise ValueError(f"{self.forward_mode = }")
+        return res
 
     def _step(self, batch, batch_idx, suffix: str):
         inputs, targets = batch

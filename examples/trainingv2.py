@@ -8,9 +8,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.14.5
 #   kernelspec:
-#     display_name: Python 3.13 (RMBP+SSHFS)
+#     display_name: Python 3.13 (RMBP)
 #     language: python
-#     name: ssh_mbp_ext
+#     name: ssh_mbp_no_sshfs
 # ---
 
 # %%
@@ -21,7 +21,7 @@ import time
 from tqdm.auto import tqdm
 
 for _ in tqdm(range(10)):
-    time.sleep(0.1)
+    time.sleep(0.2)
 
 # %%
 import numpy as np
@@ -90,6 +90,10 @@ device
 # - 2b336432: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15/13/11), ...)
 # - f219f565: 2b336432 but with augment=4
 # - a8e7dd9b: f219f565 but with augment=8
+# ---
+# - d2dd90b5: f219f565 but no backbone+head
+# ---
+# - : fixed the data module to keep test set separate
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -97,10 +101,10 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-# task = "ESC"
-# threshold = 0.14
-task = "NSC"
-threshold = 0.17
+task = "ESC"
+threshold = 0.14
+# task = "NSC"
+# threshold = 0.17
 
 # %%
 # %run -i auxiliar.py
@@ -112,13 +116,13 @@ df_enrichment = load_enrichment_data(
 
 # %%
 version = randbytes(4).hex()
-# version = "f219f565"
+# version = "d2dd90b5"
 n_folds = 5
 
 for fold_idx in tqdm(range(n_folds), desc="Folds"):
-    # if fold_idx == 0:
+    # if fold_idx < 4:
     #     continue
-    model = CNNSTARR(lr=0.01, weight_decay=1e-6, revcomp=True, log_vars_prefix=task)
+    model = CNNSTARR(lr=0.01, weight_decay=1e-6, log_vars_prefix=task)
     model.to(device)
 
     fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
@@ -138,7 +142,7 @@ for fold_idx in tqdm(range(n_folds), desc="Folds"):
         sub_dir=f"fold_{fold_idx}",
     )
     trainer = L.Trainer(
-        max_epochs=15,
+        max_epochs=5,
         logger=logger,
         # callbacks=[early_stop],
         callbacks=[ThresholdCheckpoint(threshold=threshold, task=task)],

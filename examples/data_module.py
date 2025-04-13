@@ -53,6 +53,7 @@ class DMSTARR(L.LightningDataModule):
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
         fold_idx: int = 0,  # Current fold index (0 to n_folds-1)
         augment: int = 0,
+        frac_for_test: float = 0.1,
     ):
         super().__init__()
         self.df_enrichment = df_enrichment
@@ -67,7 +68,7 @@ class DMSTARR(L.LightningDataModule):
         self.n_folds = n_folds
         self.fold_idx = fold_idx
         self.augment = augment
-
+        self.frac_for_test = frac_for_test
         assert y_col in df_enrichment.columns
 
     def prepare_data(self):
@@ -81,32 +82,34 @@ class DMSTARR(L.LightningDataModule):
         else:
             df = self.df_enrichment
 
-        if self.n_folds is None:
+        if self.frac_for_test:
             df, self.df_test = train_test_split(
+                df,
+                test_size=self.frac_for_test,
+                random_state=self.random_state,
+                stratify=bins(df[self.y_col]),
+            )
+
+        if self.n_folds is not None:
+            kf = StratifiedKFold(
+                n_splits=self.n_folds, shuffle=True, random_state=self.random_state
+            )
+            for i, (train_idxs, val_idxs) in enumerate(
+                kf.split(df, bins(df[self.y_col]))
+            ):
+                if i == self.fold_idx:
+                    assert len(val_idxs) < len(train_idxs)
+                    self.df_val = df.iloc[val_idxs]
+                    self.df_train = df.iloc[train_idxs]
+                    break
+        else:
+            self.df_train, self.df_val = train_test_split(
                 df,
                 test_size=0.10,
                 random_state=self.random_state,
                 stratify=bins(df[self.y_col]),
             )
-        else:
-            kf = StratifiedKFold(
-                n_splits=self.n_folds, shuffle=True, random_state=self.random_state
-            )
-            for i, (df_idxs, test_idxs) in enumerate(
-                kf.split(df, bins(df[self.y_col]))
-            ):
-                if i == self.fold_idx:
-                    assert len(test_idxs) < len(df_idxs)
-                    self.df_test = df.iloc[test_idxs]
-                    df = df.iloc[df_idxs]
-                    break
 
-        self.df_train, self.df_val = train_test_split(
-            df,
-            test_size=0.10,
-            random_state=self.random_state,
-            stratify=bins(df[self.y_col]),
-        )
         if self.augment:
             self.df_train = augment_data(
                 df_train=self.df_train,
@@ -118,7 +121,7 @@ class DMSTARR(L.LightningDataModule):
         return DataLoader(
             make_tensor_dataset(df=df, x_col="SeqEnc", y_col=self.y_col),
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,
         )
 
     def setup(self, stage: Optional[str] = None):
