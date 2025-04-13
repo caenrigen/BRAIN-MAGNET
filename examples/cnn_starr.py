@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import lightning as L
 import torch
@@ -10,13 +11,13 @@ class CNNSTARR(L.LightningModule):
         self,
         lr: float = 0.01,
         weight_decay: float = 0,
-        revcomp: bool = True,
         log_vars_prefix: str = "NSC",
+        forward: Literal["main", "revcomp", "both"] = "main",
     ):
         super().__init__()
         self.lr = lr
         self.weight_decay = weight_decay
-        self.revcomp = revcomp
+        self.forward = forward
         self.log_vars_prefix = log_vars_prefix
         self.loss_fn = nn.MSELoss()
 
@@ -56,13 +57,17 @@ class CNNSTARR(L.LightningModule):
         return z
 
     def forward(self, x):
-        embed_fwd = self.forward_backbone(x)
-        if self.revcomp:
-            embed_rc = self.forward_backbone(tensor_reverse_complement(x))
-            embed_merged = (embed_fwd + embed_rc) / 2
+        if self.forward == "main":
+            backbone = self.forward_backbone(x)
+        elif self.forward == "revcomp":
+            backbone = self.forward_backbone(tensor_reverse_complement(x))
+        elif self.forward == "both":
+            backbone_fwd = self.forward_backbone(x)
+            backbone_rc = self.forward_backbone(tensor_reverse_complement(x))
+            backbone = (backbone_fwd + backbone_rc) / 2
         else:
-            embed_merged = embed_fwd
-        return self.head(embed_merged)
+            raise ValueError(f"{self.forward = }")
+        return self.head(backbone)
 
     def _step(self, batch, batch_idx, suffix: str):
         inputs, targets = batch
