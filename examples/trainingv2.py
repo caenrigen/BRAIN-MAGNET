@@ -21,7 +21,7 @@ import time
 from tqdm.auto import tqdm
 
 for _ in tqdm(range(10)):
-    time.sleep(0.2)
+    time.sleep(0.1)
 
 # %%
 import numpy as np
@@ -93,7 +93,11 @@ device
 # ---
 # - d2dd90b5: f219f565 but no backbone+head
 # ---
-# - : fixed the data module to keep test set separate
+# - 4cdb5f99: fixed the data module to keep test set separate
+# ---
+# - 44c93be6/: no test, 5% val
+# ---
+# - 5fe37103: no test, 5% val, log2log2norm, pearson loss
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -101,38 +105,51 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-task = "ESC"
-threshold = 0.14
-# task = "NSC"
-# threshold = 0.17
+tasks = [
+    ("ESC", 0.14),
+    ("NSC", 0.17),
+]
+task, threshold = tasks[0]
 
 # %%
-# %run -i auxiliar.py
-# %run -i cnn_starr.py
-# %run -i data_module.py
 df_enrichment = load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=f"{task}_log2_enrichment"
+    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
+    y_col=f"{task}_log2_enrichment",
+    log2log2norm=True,
 )
 
 # %%
 version = randbytes(4).hex()
 # version = "d2dd90b5"
-n_folds = 5
+n_folds = None
+max_epochs = 10
+frac_for_test = 0
+frac_for_val = 0.05
+augment = 4
+y_col = f"{task}_log2log2norm_enrichment"
+bins_func = bins
+loss_fn = pearson_correlation_loss
 
-for fold_idx in tqdm(range(n_folds), desc="Folds"):
-    # if fold_idx < 4:
-    #     continue
-    model = CNNSTARR(lr=0.01, weight_decay=1e-6, log_vars_prefix=task)
+
+def train(df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=0):
+    model = CNNSTARR(
+        lr=0.01,
+        weight_decay=1e-6,
+        log_vars_prefix=task,
+        loss_fn=loss_fn,
+    )
     model.to(device)
 
-    fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
     data_loader = DMSTARR(
         df_enrichment=df_enrichment,
         sample=None,
-        y_col=f"{task}_log2_enrichment",
+        y_col=y_col,
         n_folds=n_folds,
         fold_idx=fold_idx,
-        augment=4,
+        augment=augment,
+        frac_for_test=frac_for_test,
+        frac_for_val=frac_for_val,
+        bins_func=bins_func,
     )
 
     logger = TensorBoardLogger(
@@ -142,7 +159,7 @@ for fold_idx in tqdm(range(n_folds), desc="Folds"):
         sub_dir=f"fold_{fold_idx}",
     )
     trainer = L.Trainer(
-        max_epochs=5,
+        max_epochs=max_epochs,
         logger=logger,
         # callbacks=[early_stop],
         callbacks=[ThresholdCheckpoint(threshold=threshold, task=task)],
@@ -152,11 +169,21 @@ for fold_idx in tqdm(range(n_folds), desc="Folds"):
         trainer.fit(model, data_loader)  # run training
     except (KeyboardInterrupt, NameError):
         print("Training interrupted by user")
-        break
+        return False
 
+    return True
     # test_result = trainer.test(model, data_loader)[0]
     # results.append(test_result)
 
-    del model, data_loader, logger, trainer
+
+if n_folds:
+    for fold_idx in tqdm(range(n_folds), desc="Folds"):
+        res = train(
+            df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=fold_idx
+        )
+        if not res:
+            break
+else:
+    res = train(df_enrichment, threshold, task, max_epochs, n_folds)
 
 # %%
