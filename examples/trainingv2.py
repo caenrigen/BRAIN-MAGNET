@@ -37,6 +37,7 @@ from tqdm.auto import tqdm
 from pathlib import Path
 from typing import Optional
 from functools import partial
+import gc
 
 # %%
 import lightning as L
@@ -98,6 +99,8 @@ device
 # - 44c93be6/: no test, 5% val
 # ---
 # - 5fe37103: no test, 5% val, log2log2norm, pearson loss
+# ---
+# - 
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -105,11 +108,8 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-tasks = [
-    ("ESC", 0.14),
-    ("NSC", 0.17),
-]
-task, threshold = tasks[0]
+# task = "ESC"
+task = "NSC"
 
 # %%
 df_enrichment = load_enrichment_data(
@@ -120,23 +120,20 @@ df_enrichment = load_enrichment_data(
 
 # %%
 version = randbytes(4).hex()
-# version = "d2dd90b5"
-n_folds = None
+n_folds = 5
 max_epochs = 10
 frac_for_test = 0
 frac_for_val = 0.05
-augment = 4
+augment = 6
 y_col = f"{task}_log2log2norm_enrichment"
 bins_func = bins
-loss_fn = pearson_correlation_loss
 
 
-def train(df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=0):
+def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
     model = CNNSTARR(
         lr=0.01,
         weight_decay=1e-6,
         log_vars_prefix=task,
-        loss_fn=loss_fn,
     )
     model.to(device)
 
@@ -162,7 +159,7 @@ def train(df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=0):
         max_epochs=max_epochs,
         logger=logger,
         # callbacks=[early_stop],
-        callbacks=[ThresholdCheckpoint(threshold=threshold, task=task)],
+        callbacks=[EpochCheckpoint(task=task)],
     )
 
     try:
@@ -171,19 +168,22 @@ def train(df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=0):
         print("Training interrupted by user")
         return False
 
+    model.cpu()
+    del model, data_loader, logger, trainer
+    gc.collect()
+    torch.mps.empty_cache()
+
     return True
-    # test_result = trainer.test(model, data_loader)[0]
-    # results.append(test_result)
 
 
 if n_folds:
     for fold_idx in tqdm(range(n_folds), desc="Folds"):
-        res = train(
-            df_enrichment, threshold, task, max_epochs, n_folds, fold_idx=fold_idx
-        )
+        # if fold_idx < 4:
+        #     continue
+        res = train(df_enrichment, task, max_epochs, n_folds, fold_idx=fold_idx)
         if not res:
             break
 else:
-    res = train(df_enrichment, threshold, task, max_epochs, n_folds)
+    res = train(df_enrichment, task, max_epochs, n_folds)
 
 # %%

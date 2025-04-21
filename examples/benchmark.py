@@ -72,7 +72,7 @@ n_folds = 5
 
 # %%
 tasks = [
-    ("ESC", "5fe37103"),
+    ("ESC", "f952c4c5"),
     # ("NSC", ""),
 ]
 
@@ -140,7 +140,7 @@ df_stats
 
 # %%
 epoch_per_fold = {}
-n_folds = 1
+n_folds = 5
 for fold in range(n_folds):
     epoch = pick_checkpoint(df_stats, fold, plot=True)
     epoch_per_fold[fold] = epoch
@@ -179,7 +179,7 @@ df = dfc
 fold = 0
 df = df[df.fold == fold]
 # display(df)
-epoch = 4
+epoch = 2
 fp = df[df.epoch == epoch].fp.iloc[0]
 print(fp)
 
@@ -189,15 +189,105 @@ model = load_model(fp, forward_mode="both", device=device)
 # %%
 y_col = f"{task}_log2_enrichment"
 df_enrichment = load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=y_col
+    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=y_col, log2log2norm=True
 )
 display(df_enrichment.head())
+y_col = f"{task}_log2log2norm_enrichment"
 dl = make_dl(df_enrichment, y_col=y_col, batch_size=256, shuffle=False)
 
 # %%
 targets, preds = eval_model(model, dl, device=device)
+
+# %%
 mse, pearson, spearman = model_stats(targets, preds)
 mse, pearson, spearman
+
+# %%
+sns.histplot(targets, bins=100, log_scale=False)
+preds_fixed = preds.copy()
+preds_fixed /= preds_fixed.std()
+preds_fixed -= preds_fixed.mean()
+sns.histplot(preds_fixed, bins=100, log_scale=False)
+# sns.histplot(preds, bins=100, log_scale=False)
+plt.show()
+targets.mean(), targets.std(), preds_fixed.mean(), preds_fixed.std()
+
+# %%
+y_col = "ESC_log2_enrichment"
+std, mean = df_enrichment[y_col].std(), df_enrichment[y_col].mean()
+targets_shifted_back = 2 ** (targets * std + mean) - 1
+preds_shifted_back = 2 ** (preds * std + mean) - 1
+preds_fixed_shifted_back = 2 ** (preds_fixed * std + mean) - 1
+print(model_stats(targets_shifted_back, preds_shifted_back))
+print(model_stats(targets_shifted_back, preds_fixed_shifted_back))
+
+# %%
+targets_shifted_back.min()
+
+
+# %%
+sns.histplot(targets_shifted_back, bins=100, log_scale=False, stat="percent")
+sns.histplot(preds_fixed_shifted_back, bins=100, log_scale=False, stat="percent")
+sns.histplot(preds_shifted_back, bins=100, log_scale=False, stat="percent")
+
+# %%
+df_enrichment[y_col].describe()
+
+# %%
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import Normalize
+from scipy.interpolate import interpn
+
+
+def density_scatter(x, y, ax, fig, sort=True, bins=100, **kwargs):
+    """Scatter plot colored by 2d histogram"""
+    data, x_e, y_e = np.histogram2d(x, y, bins=bins, density=True)
+    z = interpn(
+        (0.5 * (x_e[1:] + x_e[:-1]), 0.5 * (y_e[1:] + y_e[:-1])),
+        data,
+        np.vstack([x, y]).T,
+        method="splinef2d",
+        bounds_error=False,
+    )
+
+    # To be sure to plot all data
+    z[np.where(np.isnan(z))] = 0.0
+
+    # Sort the points by density, so that the densest points are plotted last
+    if sort:
+        idx = z.argsort()
+        x, y, z = x[idx], y[idx], z[idx]
+
+    ax.scatter(x, y, c=z, **kwargs)
+
+    # norm = Normalize(vmin=np.min(z), vmax=np.max(z))
+    # cbar = fig.colorbar(cm.ScalarMappable(norm=norm), ax=ax)
+    # cbar.ax.set_ylabel("Density")
+
+    return ax
+
+
+
+# %%
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 5))
+density_scatter(
+    x=targets_shifted_back, y=preds_shifted_back, ax=ax1, fig=fig, cmap="plasma_r"
+)
+# fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+density_scatter(
+    x=targets_shifted_back,
+    y=preds_fixed_shifted_back,
+    ax=ax2,
+    fig=fig,
+    cmap="plasma_r",
+)
+ax1.set_ylim(-1, 15)
+ax2.set_ylim(-1, 15)
+ax1.set_aspect("equal")
+ax2.set_aspect("equal")
+
 
 # %%
 df = df_enrichment
@@ -232,15 +322,8 @@ df.mse_rel.plot(marker="o")
 # df.mse_rel_log.plot(marker="o")
 
 # %%
-s = np.log2(1 + df_enrichment.ESC_log2_enrichment)
-s -= s.mean()
-s /= s.std()
-sns.histplot(s, bins=50, log_scale=False)
-
-# %%
-s.isna().sum()
-
-# %%
 sns.histplot(df_enrichment, x=y_col, bins=100, log_scale=False)
 plt.show()
 # sns.histplot(df_enrichment, x=y_col, bins=100, log_scale=True)
+
+# %%

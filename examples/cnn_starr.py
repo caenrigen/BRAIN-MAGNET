@@ -134,18 +134,18 @@ class CNNSTARR(L.LightningModule):
         )
 
 
-class ThresholdCheckpoint(L.Callback):
-    def __init__(self, threshold: float = 0.14, task: str = "ESC"):
+class EpochCheckpoint(L.Callback):
+    def __init__(self, task: str = "ESC"):
         super().__init__()
-        self.threshold = threshold
         self.task = task
 
     def on_validation_epoch_end(self, trainer: L.Trainer, pl_module):
         val_loss = trainer.callback_metrics.get(f"{self.task}_loss_val")
-        if val_loss is not None and val_loss <= self.threshold:
-            checkpoint_dir = Path(trainer.logger.log_dir) / "threshold_checkpoints"
+        train_loss = trainer.callback_metrics.get(f"{self.task}_loss_train")
+        if val_loss is not None and train_loss is not None:
+            checkpoint_dir = Path(trainer.logger.log_dir) / "epoch_checkpoints"
             checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            fn = f"{self.task}_vloss{int(val_loss * 1000):d}_ep{trainer.current_epoch}.pt"
+            fn = f"{self.task}_ep{trainer.current_epoch:02d}_vloss{int(val_loss * 1000):04d}_tloss{int(train_loss * 1000):04d}.pt"
             fp = checkpoint_dir / fn
             torch.save(pl_module.state_dict(), fp)
 

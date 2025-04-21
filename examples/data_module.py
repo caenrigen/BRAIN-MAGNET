@@ -166,7 +166,7 @@ def list_fold_checkpoints(dp_train: Path, version: str, task: str):
     fps = []
     dp = dp_train / f"starr_{task}" / version
     for dp in dp.glob(r"fold_*"):
-        dp /= "threshold_checkpoints"
+        dp /= "epoch_checkpoints"
         fps += list(dp.glob(rf"{task}*.pt"))
     return fps
 
@@ -177,13 +177,22 @@ def checkpoint_fps_to_df(fps):
         fn = fp.name
         fold = int(fp.parent.parent.name.split("fold_")[1].split("_")[0])
         # Extract val_loss and epoch from filename (format:
-        # {task}_vloss{val_loss}_ep{epoch}.pt)
-        val_loss_str = fn.split("vloss")[1].split("_")[0]
-        epoch_str = fn.split("ep")[1].split(".")[0]
-        val_loss = float(val_loss_str) / 1000  # Convert from integer representation
+        # {task}_ep{epoch}_vloss{val_loss}_tloss{train_loss}.pt)
+        epoch_str = fn.split("ep")[1].split("_")[0]
         epoch = int(epoch_str)
+        val_loss_str = fn.split("vloss")[1].split("_")[0]
+        val_loss = float(val_loss_str) / 1000  # Convert from integer representation
+        train_loss_str = fn.split("tloss")[1].split(".")[0]
+        train_loss = float(train_loss_str) / 1000  # Convert from integer representation
         data.append(
-            {"fp": fp, "fn": fn, "fold": fold, "val_loss": val_loss, "epoch": epoch}
+            {
+                "fp": fp,
+                "fn": fn,
+                "fold": fold,
+                "val_loss": val_loss,
+                "train_loss": train_loss,
+                "epoch": epoch,
+            }
         )
     df = pd.DataFrame(data)
     df.sort_values(by=["fold", "epoch"], inplace=True)
