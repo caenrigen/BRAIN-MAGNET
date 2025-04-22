@@ -27,12 +27,12 @@ class CNNSTARR(L.LightningModule):
         self.loss_fn = loss_fn
 
         self.model = nn.Sequential(
-            nn.Conv2d(4, 32, kernel_size=(1, 15), padding="same"),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(4, 16, kernel_size=(1, 15), padding="same"),
+            nn.BatchNorm2d(16),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Dropout(0.1),
-            nn.Conv2d(32, 16, kernel_size=(1, 13), padding="same"),
+            nn.Conv2d(16, 16, kernel_size=(1, 13), padding="same"),
             nn.BatchNorm2d(16),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
