@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Union
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -30,10 +30,27 @@ def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str):
     return TensorDataset(tensor_x, tensor_y)
 
 
+# These seem to be experimental errors, these 10 sequences are predicted by all models
+# to have high activity.
+# m_outliers = (targets < 0.2) & (preds > 2)
+OUTLIER_INDICES = [
+    7885,
+    19948,
+    20312,
+    33019,
+    46116,
+    53222,
+    75207,
+    111863,
+    120174,
+    128136,
+]
+
+
 def load_enrichment_data(
     fp: Path,
     y_col: str = "NSC_log2_enrichment",
-    log2log2norm: bool = False,
+    drop_indices: Optional[List[int]] = None,
 ):
     usecols = [
         # "Chr",
@@ -47,11 +64,8 @@ def load_enrichment_data(
     ]
     df = pd.read_csv(fp, usecols=usecols)
     df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_arr)
-    if log2log2norm:
-        s = np.log2(1 + df[y_col])
-        s -= s.mean()
-        s /= s.std()
-        df[y_col.replace("log2", "log2log2norm")] = s
+    if drop_indices:
+        df = df.drop(drop_indices)
     return df
 
 
@@ -73,7 +87,7 @@ class DMSTARR(L.LightningDataModule):
         random_state: int = 913,
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
         fold_idx: int = 0,  # Current fold index (0 to n_folds-1)
-        augment: int = 0,
+        augment: Optional[Union[Callable, int]] = None,
         frac_for_test: float = 0.1,
         frac_for_val: float = 0.1,
         bins_func: Callable = bins_log2,
@@ -97,6 +111,14 @@ class DMSTARR(L.LightningDataModule):
         self.bins_func = bins_func
 
     def prepare_data(self):
+        if self.augment:
+            if isinstance(self.augment, int):
+                self.df_enrichment["augment"] = self.augment
+            else:
+                self.df_enrichment["augment"] = self.augment(
+                    self.df_enrichment[self.y_col]
+                )
+
         if self.sample:
             _, self.df = train_test_split(
                 self.df_enrichment,
@@ -114,6 +136,8 @@ class DMSTARR(L.LightningDataModule):
                 random_state=self.random_state,
                 stratify=self.bins_func(self.df[self.y_col]),
             )
+        if self.augment and self.df_test:
+            self.df_test = augment_data(self.df_test, random_state=self.random_state)
 
         if self.n_folds is not None:
             kf = StratifiedKFold(
@@ -136,11 +160,12 @@ class DMSTARR(L.LightningDataModule):
             )
 
         if self.augment:
-            self.df_train = augment_data(
-                df_train=self.df_train,
-                num_shits=self.augment,
-                random_state=self.random_state,
-            )
+            self.df_train = augment_data(self.df_train, random_state=self.random_state)
+            if callable(self.augment):
+                # Augment the validation set as well, otherwise the validation loss is
+                # not comparable to the training loss when the augment changes the
+                # targets distribution.
+                self.df_val = augment_data(self.df_val, random_state=self.random_state)
 
     def setup(self, stage: Optional[str] = None):
         func = partial(make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col)

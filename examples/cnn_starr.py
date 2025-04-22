@@ -9,39 +9,6 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import mean_squared_error
 from scipy import stats
 
-cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
-
-
-def pearson_correlation_loss(predictions, targets):
-    """
-    Compute Pearson correlation loss using cosine similarity.
-    Returns -correlation as loss (since we want to maximize correlation).
-    """
-    # Center the predictions and targets
-    # Compute Pearson correlation using cosine similarity
-    return -cos_sim(predictions - predictions.mean(), targets - targets.mean())
-
-
-def biased_relative_loss(preds, targets, offset: float = 10):
-    """
-    Bias the loss function towards high value targets.
-
-    Using Mean Squared Logarithmic Error (MSLE) gives too much weight to low
-    value targets.
-
-    Args:
-        preds: Predicted values.
-        targets: True values.
-        offset: Offset to add to the targets used for normalizing the loss. Use some
-        value on the order of max(targets) for good results.
-    """
-    # multiply by 1000 for readability and to avoid numerical instabilities
-    return torch.mean((preds - targets) ** 2 / (targets + offset) ** 2) * 1000
-
-
-def mlse_loss(preds, targets):
-    return torch.mean((torch.log(preds + 1) - torch.log(targets + 1)) ** 2)
-
 
 class CNNSTARR(L.LightningModule):
     def __init__(
@@ -188,13 +155,13 @@ def model_stats(targets, preds):
     return mse, pearson, spearman
 
 
-def pick_checkpoint(df, fold: int, tolerance: float = 0.10, plot: bool = True):
+def pick_checkpoint(df, fold: int, tolerance: float = 0.10, ax=None):
     df = df[df.fold == fold]
     df.set_index("epoch", inplace=True)
     df.sort_index(inplace=True)
     min_, max_ = df.mse.min(), df.mse.max()
-    if plot:
-        sns.lineplot(data=df, x="epoch", y="mse", hue="set_name", marker="o")
+    if ax:
+        sns.lineplot(data=df, x="epoch", y="mse", hue="set_name", marker="o", ax=ax)
 
     df = df.pivot(columns="set_name", values="mse")
     df["diff_train_val"] = (df.train - df.val).abs()
@@ -202,7 +169,6 @@ def pick_checkpoint(df, fold: int, tolerance: float = 0.10, plot: bool = True):
     df = df[df.stop]
     df.sort_values(by=["val", "diff_train_val"], inplace=True)
     epoch = df.index.values[0]
-    if plot:
-        plt.vlines(epoch, min_, max_, color="red", linestyle="--")
-        plt.show()
+    if ax:
+        ax.vlines(epoch, min_, max_, color="red", linestyle="--")
     return epoch

@@ -1,4 +1,5 @@
 from random import Random
+from functools import partial
 import numpy as np
 import pandas as pd
 
@@ -73,25 +74,56 @@ def shift_padded_onehot(arr: np.ndarray, shift: int):
     return np.concatenate((arr[shift:, :], arr[:shift, :]), axis=0)
 
 
-def augment_data(df_train: pd.DataFrame, num_shits: int = 2, random_state: int = 913):
-    """"""
+def make_augment_col(
+    enrichment: pd.Series,
+    min_augment: int = 0,
+    max_augment: int = 24,
+    num_bins: int = 100,
+):
+    """
+    This was an experiment. It did not seem to improve spearman/pearson correlation.
+
+    Make a column with the number of times each sequence should be augmented.
+    The less samples for an enrichment bin, the more it should be augmented to keep it
+    representative during the training.
+
+    `max_augment` is the maximum number of times any sequence can be augmented. It can
+    go up to 24 because the sequences are <=1000 base pairs long and we are padding all
+    sequences to 1024 for technical reasons, which is convenient for the augmentation.
+    """
+    counts, bins = np.histogram(enrichment, bins=num_bins)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    # +1 because the augmentation is a + {N multiples of the original count},
+    # the original data is always included.
+    counts_max = (min_augment + 1) * counts.max()
+    counts = counts.clip(1, None)  # avoid division by 0
+    # the intension here is to generate a uniform distribution of across the bins, but
+    # we must clip to the max_augment since we have limited augmentation possibilities
+    # In the end the distribution will be similar to a normal distribution but truncated
+    # at the top.
+    augment = (counts_max / counts).clip(min_augment + 1, max_augment + 1) - 1
+    return np.int64(np.interp(enrichment, bin_centers, augment).round())
+
+
+def augment_data(df_input: pd.DataFrame, random_state: int = 913):
     random_obj = Random(random_state)
-    seq_lens = df_train.Seq.str.len()
-    shifts_per_seq = [
-        tuple(
-            gen_shifts(
-                seq_len, random_obj=random_obj, num_shifts=num_shits, max_len=1024
-            )
+    seq_lens = df_input.Seq.str.len()
+    dfs = [df_input]  # preserve a copy of the original data
+    for num_shifts, df in df_input.groupby("augment"):
+        if num_shifts == 0:
+            continue
+        if not isinstance(num_shifts, int):
+            raise ValueError(f"num_shifts must be an integer, got {num_shifts}")
+        gen = partial(
+            gen_shifts, random_obj=random_obj, num_shifts=num_shifts, max_len=1024
         )
-        for seq_len in seq_lens
-    ]
-    dfs = [df_train]
-    for i in range(num_shits):
-        df = df_train.copy()
-        df["SeqEnc"] = [
-            shift_padded_onehot(arr, shift=shifts[i])
-            for arr, shifts in zip(df_train.SeqEnc, shifts_per_seq)
-        ]
-        dfs.append(df)
+        shifts_per_seq = [tuple(gen(seq_len)) for seq_len in seq_lens]
+        for i in range(num_shifts):
+            df = df.copy()
+            df["SeqEnc"] = [
+                shift_padded_onehot(arr, shift=shifts[i])
+                for arr, shifts in zip(df.SeqEnc, shifts_per_seq)
+            ]
+            dfs.append(df)
     df = pd.concat(dfs)
     return df.sample(frac=1, random_state=random_state)

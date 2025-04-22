@@ -98,9 +98,11 @@ device
 # ---
 # - 44c93be6/: no test, 5% val
 # ---
-# - 5fe37103: no test, 5% val, log2log2norm, pearson loss
+# - f952c4c5: no test, 5% val, log2log2norm targets
 # ---
-# - 
+# - c8d9a9e7: ???
+# - 82c66f85: no test, 5% val, augment=6, augment both train and val, final
+# - 1c854fb3: no test, 5% val, augment=6, augment both train and val, 32/16, 7/21/63 experiment
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -108,25 +110,28 @@ device
 # %run -i cnn_starr.py
 # %run -i data_module.py
 
-# task = "ESC"
-task = "NSC"
-
 # %%
+task = "ESC"
+# task = "NSC"
 df_enrichment = load_enrichment_data(
     fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
     y_col=f"{task}_log2_enrichment",
-    log2log2norm=True,
+    drop_indices=OUTLIER_INDICES if task == "ESC" else None,
 )
 
 # %%
+gc.collect()
+torch.mps.empty_cache()
+
+# %%
 version = randbytes(4).hex()
+sample = None
 n_folds = 5
-max_epochs = 10
+max_epochs = 7
 frac_for_test = 0
 frac_for_val = 0.05
 augment = 6
-y_col = f"{task}_log2log2norm_enrichment"
-bins_func = bins
+y_col = f"{task}_log2_enrichment"
 
 
 def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
@@ -139,14 +144,13 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
 
     data_loader = DMSTARR(
         df_enrichment=df_enrichment,
-        sample=None,
+        sample=sample,
         y_col=y_col,
         n_folds=n_folds,
         fold_idx=fold_idx,
         augment=augment,
         frac_for_test=frac_for_test,
         frac_for_val=frac_for_val,
-        bins_func=bins_func,
     )
 
     logger = TensorBoardLogger(
