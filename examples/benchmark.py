@@ -8,9 +8,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.14.5
 #   kernelspec:
-#     display_name: Python 3.13 (RMBP+SSHFS)
+#     display_name: g
 #     language: python
-#     name: ssh_mbp_ext
+#     name: python3
 # ---
 
 # %%
@@ -41,14 +41,14 @@ from torch.utils.tensorboard import SummaryWriter
 from random import randbytes
 
 # %%
-# cd ./sshpyk_code/examples/
+# # cd ./sshpyk_code/examples/
 
 # %%
 random_state = 913
 # random.seed(random_state)
 
-# dbm = Path("/Volumes/Famafia/brain-magnet/")
-dbm = Path("../../sshpyk_data/")
+dbm = Path("/Volumes/Famafia/brain-magnet/")
+# dbm = Path("../../sshpyk_data/")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
 dbm.is_dir()
@@ -63,6 +63,7 @@ device
 # %%
 # Evaluate the python files within the notebook namespace
 # %run -i auxiliar.py
+# %run -i plots.py
 # %run -i cnn_starr.py
 # %run -i data_module.py
 n_folds = 5
@@ -71,14 +72,14 @@ n_folds = 5
 # # Eval models
 
 # %%
-task, version = ("ESC", "82c66f85")
+task, version = ("ESC", "b854ab5f")
 
 # %%
 y_col = f"{task}_log2_enrichment"
 df_enrichment = load_enrichment_data(
     fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
     y_col=y_col,
-    drop_indices=OUTLIER_INDICES,
+    # drop_indices=OUTLIER_INDICES,
 )
 
 # %%
@@ -165,19 +166,91 @@ df
 # The deviations between folds is pretty small:
 
 # %%
-print(f"{round(df.mse.std() / df.mse.mean() * 100, 2)}%")
-
-# %% [markdown]
-# # Check ensemble performance
+max_diff = df.mse.max() - df.mse.min()
+print(f"{round(max_diff / df.mse.mean() * 100, 2)}%")
 
 # %%
-display(df_enrichment.head())
+fps = list_fold_checkpoints(dp_train=dbmt, version=version, task=task)
+dfc = checkpoint_fps_to_df(fps)
+# Does not matter much which one we pick
+idx = 0
+fold_best, epoch_best = df_best.fold.iloc[idx], df_best.epoch.iloc[idx]
+fp_best = dfc[(dfc.epoch == epoch_best) & (dfc.fold == fold_best)].fp.iloc[0]
+fp_best
+
+# %% [markdown]
+# # Forward vs reverse complement
+
+# %%
+df_enr = df_enrichment.drop(OUTLIER_INDICES)
+df = df_enr
+dl = make_dl(df, y_col=y_col, batch_size=256, shuffle=False)
+
+for forward_mode in tqdm(["main", "revcomp"]):
+    model = load_model(fp_best, forward_mode=forward_mode, device=device)
+    targets, preds = eval_model(model, dl, device=device)
+    df[f"preds_{forward_mode}"] = preds
+
+# %% [markdown]
+# There can be "outliers" when giving the model only the "main" or the "revcomp" sequence.
+#
+# It seems it is better to average the two values.
+
+# %%
+fig, ax = plt.subplots(1, 1)
+x = df.preds_main.values
+y = df.preds_revcomp.values
+density_scatter(x, y, ax=ax, fig=fig, cmap="magma")
+model_stats(x, y)
+
+
+# %% [markdown]
+# # Scratch
+
+# %%
+t = df_sample.SeqEnc.iloc[0]
+t
+
+# %%
+x = np.stack([t])
+# convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
+tensor_x = torch.Tensor(x).permute(0, 2, 1).unsqueeze(2)
+seq_len = sum(tensor_x[:, i, :, :] for i in range(4)).sum()
+seq_len
+
+# %% [markdown]
+# # Residuals vs SeqLen
+
+# %%
+df = df_enr
+df["SeqLen"] = df.Seq.map(len)
+
+# %%
+df.SeqLen.hist()
+
+# %%
+df = df_enr
+df = df[(df.SeqLen != 500) & (df.SeqLen != 1000)]
+x = df.SeqLen.values
+y = (df.ESC_log2_enrichment - df.preds_scaled_both).values
+fig, ax = plt.subplots(1, 1)
+density_scatter(x, y, fig=fig, ax=ax)
+
+# %% [markdown]
+# # GC content
+
+# %%
+df_enrichment["SeqLen"] = df_enrichment.Seq.map(len)
+func = df_enrichment.Seq.str.count
+df_enrichment["GC"] = (func("G") + func("C")) / df_enrichment.SeqLen
+df_enrichment.head()
+
+# %%
 dl = make_dl(df_enrichment, y_col=y_col, batch_size=256, shuffle=False)
 
 # %%
 fps = list_fold_checkpoints(dp_train=dbmt, version=version, task=task)
 dfc = checkpoint_fps_to_df(fps)
-preds_all = []
 for fold, epoch in tqdm(zip(df_best.fold, df_best.epoch), total=len(df_best)):
     df = dfc
     df = df[df.fold == fold]
@@ -185,17 +258,30 @@ for fold, epoch in tqdm(zip(df_best.fold, df_best.epoch), total=len(df_best)):
     print(fp)
     model = load_model(fp, forward_mode="both", device=device)
     targets, preds = eval_model(model, dl, device=device)
-    preds_all.append(preds)
+    preds_scaled = (preds - preds.mean()) / preds.std() * targets.std() + targets.mean()
+    df_enrichment[f"preds_{fold}_{epoch}"] = preds
+    df_enrichment[f"preds_scaled_{fold}_{epoch}"] = preds_scaled
 
 # %%
-preds_ensemble = np.mean(preds_all, axis=0)
-preds_ensemble
+df_enrichment.head()
 
 # %% [markdown]
-# It improves but that is expected since averaging over all kfolds allows to learn from **all** data.
+# Little GC-content does seem to affect the results a bit.
+#
+# Lower GC content seems to correlate with higher relative residuals.
+#
+# But this might be an indication that the model actually learnt the patterns and not the
+# noise of the data.
 
 # %%
-model_stats(targets, preds_ensemble)
+df = df_enrichment
+preds = df["preds_scaled_0_5"].values
+targets = df[y_col].values
+gc_content = df.GC.values
+# plt.scatter(targets, preds)
+residuals = (preds - targets) / (targets + 10)
+fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+density_scatter(x=gc_content, y=residuals, ax=ax, fig=fig, cmap="plasma")
 
 # %% [markdown]
 # # Check performance per category
@@ -238,43 +324,6 @@ sns.histplot(targets, log_scale=False, stat="probability")
 sns.histplot(preds_fixed, log_scale=False, stat="probability")
 sns.histplot(preds, log_scale=False, stat="probability")
 plt.show()
-
-# %%
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.colors import Normalize
-from scipy.interpolate import interpn
-
-
-def density_scatter(x, y, ax, fig, sort=True, bins=100, **kwargs):
-    """Scatter plot colored by 2d histogram"""
-    data, x_e, y_e = np.histogram2d(x, y, bins=bins, density=True)
-    z = interpn(
-        (0.5 * (x_e[1:] + x_e[:-1]), 0.5 * (y_e[1:] + y_e[:-1])),
-        data,
-        np.vstack([x, y]).T,
-        method="splinef2d",
-        bounds_error=False,
-    )
-
-    # To be sure to plot all data
-    z[np.where(np.isnan(z))] = 0.0
-
-    # Sort the points by density, so that the densest points are plotted last
-    if sort:
-        idx = z.argsort()
-        x, y, z = x[idx], y[idx], z[idx]
-
-    ax.scatter(x, y, c=z, **kwargs)
-
-    # norm = Normalize(vmin=np.min(z), vmax=np.max(z))
-    # cbar = fig.colorbar(cm.ScalarMappable(norm=norm), ax=ax)
-    # cbar.ax.set_ylabel("Density")
-
-    return ax
-
-
 
 # %%
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 5), sharex=True, sharey=True)

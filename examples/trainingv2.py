@@ -8,13 +8,10 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.14.5
 #   kernelspec:
-#     display_name: Python 3.13 (RMBP)
+#     display_name: g
 #     language: python
-#     name: ssh_mbp_no_sshfs
+#     name: python3
 # ---
-
-# %%
-# cd sshpyk_code/examples
 
 # %%
 import time
@@ -24,6 +21,7 @@ for _ in tqdm(range(10)):
     time.sleep(0.1)
 
 # %%
+import os
 import numpy as np
 import seaborn as sns
 import scipy as sp
@@ -55,10 +53,18 @@ from random import randbytes
 random_state = 913
 # random.seed(random_state)
 
-dbmc = Path("/Users/victor/sshpyk_code")
-dbm = Path("/Users/victor/sshpyk_data/")
+dbmc = Path("/Users/victor/Documents/ProjectsDev/genomics/BRAIN-MAGNET")
+dbm = Path("/Volumes/Famafia/brain-magnet")
+
+# dbmc = Path("/Users/victor/sshpyk_code")
+# dbm = Path("/Users/victor/sshpyk_data/")
+
+dbmce = str(dbmc / "examples")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
+
+# %%
+os.chdir(dbmce)
 
 # %%
 print(torch.cuda.is_available(), torch.backends.mps.is_available())
@@ -68,6 +74,7 @@ device = torch.device("mps")  # might have priblems for macOS <14.0
 device
 
 # %% [raw] vscode={"languageId": "raw"}
+# # Logs
 # - 347bc336: lr=0.001, weight_decay=1e-6, dropout=0.1
 # - 288fa45b: lr=0.0005, weight_decay=1e-6, dropout=0.1
 # - 3dc19952: lr=0.0001, weight_decay=1e-6, dropout=0.1
@@ -101,8 +108,13 @@ device
 # - f952c4c5: no test, 5% val, log2log2norm targets
 # ---
 # - c8d9a9e7: ???
-# - 82c66f85: no test, 5% val, augment=6, augment both train and val, final
-# - 1c854fb3: no test, 5% val, augment=6, augment both train and val, 32/16, 7/21/63 experiment
+# - 82c66f85: no test, 5% val, augment=6, final(?)
+# - 26a38237: no test, 5% val, augment=6, 16/16, 15/13/11 experiment
+# - f4ceccfc: no test, 5% val, augment=6, 16/16, 13/11/9 experiment
+# - 6fb254fd: no test, 5% val, augment=6, 16/16, 17/15/13 experiment
+# - b854ab5f: no test, 5% val, augment=4, 16/16, 15/13/11, final
+# - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
+# - : no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -118,6 +130,7 @@ df_enrichment = load_enrichment_data(
     y_col=f"{task}_log2_enrichment",
     drop_indices=OUTLIER_INDICES if task == "ESC" else None,
 )
+df_enrichment.head()
 
 # %%
 gc.collect()
@@ -126,11 +139,17 @@ torch.mps.empty_cache()
 # %%
 version = randbytes(4).hex()
 sample = None
+
 n_folds = 5
-max_epochs = 7
+# folds = range(n_folds)
+folds = [0]
+
+max_epochs = 10
+
 frac_for_test = 0
 frac_for_val = 0.05
-augment = 6
+augment = 4
+
 y_col = f"{task}_log2_enrichment"
 
 
@@ -181,7 +200,7 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
 
 
 if n_folds:
-    for fold_idx in tqdm(range(n_folds), desc="Folds"):
+    for fold_idx in tqdm(folds, desc="Folds"):
         # if fold_idx < 4:
         #     continue
         res = train(df_enrichment, task, max_epochs, n_folds, fold_idx=fold_idx)

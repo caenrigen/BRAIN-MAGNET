@@ -65,7 +65,7 @@ def load_enrichment_data(
     df = pd.read_csv(fp, usecols=usecols)
     df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_arr)
     if drop_indices:
-        df = df.drop(drop_indices)
+        df.drop(drop_indices, inplace=True)
     return df
 
 
