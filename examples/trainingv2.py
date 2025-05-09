@@ -14,11 +14,11 @@
 # ---
 
 # %%
-import time
-from tqdm.auto import tqdm
+# import time
+# from tqdm.auto import tqdm
 
-for _ in tqdm(range(10)):
-    time.sleep(0.1)
+# for _ in tqdm(range(10)):
+#     time.sleep(0.1)
 
 # %%
 import os
@@ -37,16 +37,12 @@ from typing import Optional
 from functools import partial
 import gc
 
-# %%
 import lightning as L
 import torch
 from torch import nn
 import gc
 from torch.utils.data import DataLoader, TensorDataset
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split
-from torch.utils.tensorboard import SummaryWriter
 from random import randbytes
 
 # %%
@@ -62,15 +58,13 @@ dbm = Path("/Volumes/Famafia/brain-magnet")
 dbmce = str(dbmc / "examples")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
-
-# %%
 os.chdir(dbmce)
 
 # %%
 print(torch.cuda.is_available(), torch.backends.mps.is_available())
 # device = torch.device("cuda")
 # device = torch.device("cpu")
-device = torch.device("mps")  # might have priblems for macOS <14.0
+device = torch.device("mps")
 device
 
 # %% [raw] vscode={"languageId": "raw"}
@@ -114,7 +108,7 @@ device
 # - 6fb254fd: no test, 5% val, augment=6, 16/16, 17/15/13 experiment
 # - b854ab5f: no test, 5% val, augment=4, 16/16, 15/13/11, final
 # - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
-# - : no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
+# - f9bd95fa: no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -138,6 +132,7 @@ torch.mps.empty_cache()
 
 # %%
 version = randbytes(4).hex()
+print(f"{version = }")
 sample = None
 
 n_folds = 5
@@ -208,5 +203,8 @@ if n_folds:
             break
 else:
     res = train(df_enrichment, task, max_epochs, n_folds)
+
+# %%
+version
 
 # %%
