@@ -23,8 +23,9 @@ def bins_log2(s, n: int = 8):
 
 def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str):
     x = np.stack(df[x_col].values)
-    # convert input: [batch, seq_len, 4] -> [batch, 4, 1, seq_len]
-    tensor_x = torch.Tensor(x).permute(0, 2, 1).unsqueeze(2)
+    # [batch, seq_len, 4] -> [batch, 4, seq_len]
+    # Convolutional layers expect tensors with shape [batch, channels, length]
+    tensor_x = torch.Tensor(x).permute(0, 2, 1)
     # add one dimension in targets: [batch] -> [batch, 1]
     tensor_y = torch.Tensor(df[y_col].values).unsqueeze(1)
     return TensorDataset(tensor_x, tensor_y)

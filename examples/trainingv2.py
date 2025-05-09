@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -14,11 +14,12 @@
 # ---
 
 # %%
-# import time
-# from tqdm.auto import tqdm
+# Test tqdm progress bar
+import time
+from tqdm.auto import tqdm
 
-# for _ in tqdm(range(10)):
-#     time.sleep(0.1)
+for _ in tqdm(range(10)):
+    time.sleep(0.1)
 
 # %%
 import os
@@ -109,6 +110,7 @@ device
 # - b854ab5f: no test, 5% val, augment=4, 16/16, 15/13/11, final
 # - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
 # - f9bd95fa: no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
+# - 02fe8ebd: no test, 5% val, augment=4, all 16, 15/13/11, swap conv2d->conv1d
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -136,8 +138,8 @@ print(f"{version = }")
 sample = None
 
 n_folds = 5
-# folds = range(n_folds)
-folds = [0]
+folds = range(n_folds)
+# folds = [0]
 
 max_epochs = 10
 
