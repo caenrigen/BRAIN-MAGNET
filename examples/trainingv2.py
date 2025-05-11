@@ -111,6 +111,7 @@ device
 # - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
 # - f9bd95fa: no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
 # - 02fe8ebd: no test, 5% val, augment=4, all 16, 15/13/11, swap conv2d->conv1d
+# - 9f6cf870: no test, 5% val, augment=None, all 16, 15/13/11, swap conv2d->conv1d
 
 # %%
 # Evaluate the python files within the notebook namespace
@@ -141,11 +142,12 @@ n_folds = 5
 folds = range(n_folds)
 # folds = [0]
 
-max_epochs = 10
+max_epochs = 10 * 5
 
 frac_for_test = 0
 frac_for_val = 0.05
-augment = 4
+# augment = 4
+augment = None
 
 y_col = f"{task}_log2_enrichment"
 
