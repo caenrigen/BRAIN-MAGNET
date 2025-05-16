@@ -31,11 +31,21 @@ def one_hot_encode(sequence: str):
     return HASH_TABLE[to_uint8(sequence)]
 
 
-def pad_arr(snippet: np.ndarray, arr_pre: int = 1024):
-    assert len(snippet) <= arr_pre, len(snippet)
-    arr_len = len(snippet)
+def pad_one_hot(one_hot: np.ndarray, arr_pre: int = 1024):
+    """
+    Padded to 1024 because certain neural network layers have not been implemented
+    for lengths that are not a power of 2 on all types of devices (e.g. Apple MPS).
+    """
+    assert one_hot.ndim == 2 and one_hot.shape[1] == 4, one_hot.shape
+    assert len(one_hot) <= arr_pre, len(one_hot)
+    arr_len = len(one_hot)
     pad = (arr_pre - arr_len) / 2
-    return np.pad(snippet, [(int(pad), math.ceil(pad)), (0, 0)], mode="constant")
+    return np.pad(one_hot, [(int(pad), int(np.ceil(pad))), (0, 0)], mode="constant")
+
+
+def unpad_one_hot(one_hot: np.ndarray):
+    # Drop all rows that are all zeros (zero padding)
+    return one_hot[one_hot.sum(axis=1) != 0]
 
 
 def tensor_reverse_complement(x):
