@@ -31,15 +31,15 @@ def one_hot_encode(sequence: str):
     return HASH_TABLE[to_uint8(sequence)]
 
 
-def pad_one_hot(one_hot: np.ndarray, arr_pre: int = 1024):
+def pad_one_hot(one_hot: np.ndarray, to: int = 1024):
     """
     Padded to 1024 because certain neural network layers have not been implemented
     for lengths that are not a power of 2 on all types of devices (e.g. Apple MPS).
     """
     assert one_hot.ndim == 2 and one_hot.shape[1] == 4, one_hot.shape
-    assert len(one_hot) <= arr_pre, len(one_hot)
+    assert len(one_hot) <= to, len(one_hot)
     arr_len = len(one_hot)
-    pad = (arr_pre - arr_len) / 2
+    pad = (to - arr_len) / 2
     return np.pad(one_hot, [(int(pad), int(np.ceil(pad))), (0, 0)], mode="constant")
 
 
