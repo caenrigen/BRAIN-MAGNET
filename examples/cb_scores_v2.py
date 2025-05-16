@@ -81,10 +81,8 @@ df_enrichment["SeqLen"] = df_enrichment.Seq.str.len()
 
 # %%
 df_sample = df_enrichment.loc[OUTLIER_INDICES].copy()
+df_sample_1000 = df_sample[df_sample.SeqLen == 1000].copy()
 df_sample
-
-# %%
-# pad_one_hot?
 
 # %% [markdown]
 # # Scratch pad
@@ -130,16 +128,20 @@ def make_shuffled_seqs(
 
 # %%
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
+# My fork fixes an issue for data that is on GPU/MPS
+# https://github.com/caenrigen/shap/commit/0db4abbc916688f1d937ca1f62003e4a149ba0df
 import shap
 
 # https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
 import deeplift
 
-# from importlib import reload
-# reload(shap.explainers.deep)
-# reload(shap.explainers.deep.deep_pytorch)
-# reload(shap.explainers)
-# reload(shap)
+from importlib import reload
+
+reload(shap)
+reload(shap.explainers)
+reload(shap.explainers.deep)
+reload(shap.explainers.deep.deep_pytorch)
+
 
 import deeplift.dinuc_shuffle as ds
 import dinuc_shuffle_v0_6_11_0 as ds0611
@@ -169,7 +171,7 @@ def onehot_dinuc_shuffle(s):
     #     )
     # ]
     shuffled_argmax_vals = [int(x) for x in ds0611.dinuc_shuffle(argmax_vals)]
-    to_return = np.zeros_like(s)
+    to_return = np.zeros_like(s).astype(np.float32)
     to_return[list(range(len(s))), shuffled_argmax_vals] = 1
     return to_return
 
@@ -185,7 +187,7 @@ def shuffle_several_times(inp):
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
     if inp is None:
-        return torch.tensor(np.zeros((1, 4, 1, 1000)).astype("float32")).to(device)
+        return torch.tensor(np.zeros((1, 4, 1, 1000)).astype(np.float32)).to(device)
     else:
         # Some reshaping/transposing needs to be performed before calling
         # onehot_dinuc_shuffle becuase the input to the DeepSEA model
@@ -197,9 +199,9 @@ def shuffle_several_times(inp):
                     onehot_dinuc_shuffle(
                         inp[0].detach().cpu().numpy().squeeze().transpose(1, 0)
                     ).transpose((1, 0))[:, None, :]
-                    for i in range(100)
+                    for i in range(30)
                 ]
-            ).astype("float32")
+            ).astype(np.float32)
         ).to(device)
         return to_return
 
@@ -235,10 +237,10 @@ def combine_mult_and_diffref(mult, orig_inp, bg_data):
         # like if different bases were present in the underlying sequence is that
         # the multipliers are computed once using the original sequence, and are not
         # computed again for each hypothetical sequence.
-        projected_hypothetical_contribs = np.zeros_like(bg_data[l]).astype("float")
+        projected_hypothetical_contribs = np.zeros_like(bg_data[l]).astype(np.float32)
         assert len(orig_inp[l].shape) == 2, orig_inp[l].shape
         for i in range(orig_inp[l].shape[-1]):
-            hypothetical_input = np.zeros_like(orig_inp[l]).astype("float")
+            hypothetical_input = np.zeros_like(orig_inp[l]).astype(np.float32)
             hypothetical_input[:, i] = 1.0
             hypothetical_difference_from_reference = (
                 hypothetical_input[None, :, :] - bg_data[l]
@@ -257,47 +259,26 @@ def combine_mult_and_diffref(mult, orig_inp, bg_data):
     return to_return
 
 
-def load_model(task):
-    if task == "NSC":
-        # cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth", map_location=torch.device('cpu')))
-        cnn_starr.load_state_dict(
-            torch.load(
-                "/data/scratch/rdeng/enhancer_project/model/checkpoint_NSC_212697.2D.pth"
-            )
-        )
-    elif task == "ESC":
-        #         cnn_starr.load_state_dict(torch.load("/data/scratch/rdeng/enhancer_project/model/checkpoint_ESC_212696.2D.pth", map_location=torch.device('cpu')))
-        cnn_starr.load_state_dict(
-            torch.load(
-                "/data/scratch/rdeng/enhancer_project/model/checkpoint_ESC_212696.2D.pth"
-            )
-        )
-    else:
-        print("Please provide correct cell type")
-    return cnn_starr
-
-
 # calculate contribution score, and save it as npy for TF-modisco
-def contri_score(dataloader, task):
+def contri_score(dataloader, model_trained: CNNSTARR):
     whole_inputs = []
     whole_shap_explanations = []
 
     for batch, data in enumerate(dataloader):
-        inputs, targets = data
+        inputs, _targets = data
         inputs = inputs.to(device)
-        targets = targets.to(device)
+        # targets = targets.to(device) # not needed for shap
 
         # calculate shap
         e = shap.DeepExplainer(
-            (cnn_starr),
-            shuffle_several_times,
+            model=model_trained,
+            data=shuffle_several_times,
             combine_mult_and_diffref=combine_mult_and_diffref,
         )
 
         shap_explanations = e.shap_values(inputs)
 
-        # shap_explanations = shap_explanations.cpu().detach().numpy()
-
+        # # ? what is this? commend in the wrong place? outdated?
         # process gradients with gradient correction (Majdandzic et al. 2022)
         inputs = inputs.cpu().detach().numpy()
 
@@ -305,39 +286,74 @@ def contri_score(dataloader, task):
         whole_shap_explanations.append(shap_explanations)
 
     whole_inputs = np.concatenate(whole_inputs, axis=0)
-    whole_inputs = whole_inputs.squeeze()  # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_shap_explanations = np.concatenate(whole_shap_explanations, axis=0)
-    whole_shap_explanations = whole_shap_explanations.squeeze()  # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
+    # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
+    whole_inputs = whole_inputs.squeeze()
 
-    np.save(
-        "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/contri_score/shap_explanations_"
-        + task
-        + ".npy",
-        whole_shap_explanations,
-    )
-    np.save(
-        "/data/scratch/rdeng/enhancer_project/ipython_notebooks/2D/contri_score/inp_"
-        + task
-        + ".npy",
-        whole_inputs,
-    )
+    whole_shap_explanations = np.concatenate(whole_shap_explanations, axis=0)
+    # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
+    whole_shap_explanations = whole_shap_explanations.squeeze()
+
+    # np.save(
+    #     "contri_score/shap_explanations_" + task + ".npy",
+    #     whole_shap_explanations,
+    # )
+    # np.save(
+    #     "contri_score/inp_" + task + ".npy",
+    #     whole_inputs,
+    # )
+    return whole_inputs, whole_shap_explanations
 
 
 # %%
-# calculate contribution score
+dataset = make_tensor_dataset(
+    df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment"
+)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+dataloader
 
-# NSC
-task = "NSC"
-test_dataloader_NSC = create_dataset(5, task=task)
-load_model(task)
-contri_score(test_dataloader_NSC, task=task)
-test = contri_score(test_dataloader_NSC, task=task)
+# %%
+version = "f9bd95fa"
+fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
+df_models = pd.read_pickle(fp)
+fig, ax = plt.subplots(1, 1)
+fold = 0
+epoch = pick_checkpoint(df_models, fold=fold, ax=ax)
+fold, epoch
 
-# ESC
-# task = "ESC"
-# test_dataloader_ESC = create_dataset(5, task = task)
-# load_model(task)
-# contri_score(test_dataloader_ESC, task = task)
+
+# %%
+dp_checkpoints = dbmt / f"starr_{task}" / version / f"fold_{fold}" / "epoch_checkpoints"
+fp_model_checkpoint = list(dp_checkpoints.glob(f"{task}_ep{epoch:02d}*.pt"))[0]
+fp_model_checkpoint
+
+
+# %%
+model_trained = load_model(
+    fp=fp_model_checkpoint,
+    device=device,
+    forward_mode="main",
+)
+model_trained
+
+# %%
+inputs, shap_explanations = contri_score(dataloader, model_trained=model_trained)
+
+# %%
+inputs.shape, shap_explanations.shape
+
+
+# %%
+from deeplift.visualization import viz_sequence
+
+for input_seq, hyp_imp_scores in zip(inputs, shap_explanations):
+    start, end = 750, 1000
+    segment = input_seq[:, start:end]
+    hyp_imp_scores_segment = hyp_imp_scores[:, start:end]
+    viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
+    # * The actual importance scores can be computed using an element-wise product of
+    # * the hypothetical importance scores and the actual importance scores
+    viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
+    break
 
 # %% [markdown]
 # ## Percentile contribution score
@@ -692,11 +708,10 @@ def unpadded(idx_nonzero, inps):
     """
     non_padded = []
     for num, (first_nonzero, last_nonzero) in enumerate(idx_nonzero):
-        #         first_nonzero, last_nonzero = 0, 1000 # IMPORTANT: this won't trim zeros
+        # first_nonzero, last_nonzero = 0, 1000 # IMPORTANT: this won't trim zeros
         num_unpadded = inps[num, :, first_nonzero:last_nonzero]
-        num_unpadded = num_unpadded.transpose(
-            1, 0
-        )  # convert [4,length] -> [length, 4] for the TFmodisco
+        # convert [4,length] -> [length, 4] for the TFmodisco
+        num_unpadded = num_unpadded.transpose(1, 0)
         non_padded.append(num_unpadded.astype("float32"))
     return non_padded
 
