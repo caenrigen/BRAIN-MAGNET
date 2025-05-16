@@ -152,17 +152,13 @@ import dinuc_shuffle_v0_6_11_0 as ds0611
 #
 
 # %%
-### IMPORTANT MESSAGE!!! In order to run the code on the GPU, I changed the "/trinity/home/rdeng/enhancer/lib/python3.7/site-packages/torch/_tensor.py"
-### return self.numpy() -> return self.cpu().detach().numpy()
-### return self.numpy().astype(dtype, copy=False) -> return self.cpu().detach().numpy().astype(dtype, copy=False)
-
-# %%
 # this function performs a dinucleotide shuffle of a one-hot encoded sequence
 # It expects the supplied input in the format (length x 4)
 def onehot_dinuc_shuffle(s):
     s = np.squeeze(s)
     assert len(s.shape) == 2
     assert s.shape[1] == 4
+    # The argmax identifies the index that == 1 in the one-hot encoded sequence
     argmax_vals = "".join([str(x) for x in np.argmax(s, axis=-1)])
     # shuffled_argmax_vals = [
     #     int(x)
@@ -176,33 +172,37 @@ def onehot_dinuc_shuffle(s):
     return to_return
 
 
+def from_tensor(t):
+    return t.detach().squeeze().transpose(1, 0).cpu().numpy()
+
+
+def onehot_to_tensor_shape(one_hot: np.ndarray):
+    return one_hot.transpose(1, 0)[:, None, :]
+
+
 # This generates 100 dinuc-shuffled references per sequence
 # In my (Avanti Shrikumar) experience,
 # 100 references per sequence is on the high side; around 10 work well in practice
 # I am using 100 references here just for demonstration purposes.
 # Note that when an input of None is supplied, the function returns a tensor
 # that has the same dimensions as actual input batches
-def shuffle_several_times(inp):
+def shuffle_several_times(inp, num_shufs: int = 30):
     # I am assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
     if inp is None:
-        return torch.tensor(np.zeros((1, 4, 1, 1000)).astype(np.float32)).to(device)
+        return torch.tensor(np.zeros((1, 4, 1, 1000), dtype=np.float32)).to(device)
     else:
+        t_seq_1hot = inp[0]
         # Some reshaping/transposing needs to be performed before calling
         # onehot_dinuc_shuffle becuase the input to the DeepSEA model
         # is in the format (4 x 1 x length) for each sequence, whereas
         # onehot_dinuc_shuffle expects (length x 4)
-        to_return = torch.tensor(
-            np.array(
-                [
-                    onehot_dinuc_shuffle(
-                        inp[0].detach().cpu().numpy().squeeze().transpose(1, 0)
-                    ).transpose((1, 0))[:, None, :]
-                    for i in range(30)
-                ]
-            ).astype(np.float32)
-        ).to(device)
+        it = (
+            onehot_to_tensor_shape(onehot_dinuc_shuffle(from_tensor(t_seq_1hot)))
+            for _ in range(num_shufs)
+        )
+        to_return = torch.tensor(np.array(list(it), dtype=np.float32)).to(device)
         return to_return
 
 
@@ -280,7 +280,7 @@ def contri_score(dataloader, model_trained: CNNSTARR):
 
         # # ? what is this? commend in the wrong place? outdated?
         # process gradients with gradient correction (Majdandzic et al. 2022)
-        inputs = inputs.cpu().detach().numpy()
+        inputs = inputs.detach().cpu().numpy()
 
         whole_inputs.append(inputs)
         whole_shap_explanations.append(shap_explanations)
