@@ -76,8 +76,15 @@ df_enrichment = load_enrichment_data(
 )
 df_enrichment.head()
 
-df_sample = df_enrichment.sample(100)
-df_sample.head()
+# %%
+df_enrichment["SeqLen"] = df_enrichment.Seq.str.len()
+
+# %%
+df_sample = df_enrichment.loc[OUTLIER_INDICES].copy()
+df_sample
+
+# %%
+# pad_one_hot?
 
 # %% [markdown]
 # # Scratch pad
@@ -155,10 +162,13 @@ def onehot_dinuc_shuffle(s):
     assert len(s.shape) == 2
     assert s.shape[1] == 4
     argmax_vals = "".join([str(x) for x in np.argmax(s, axis=-1)])
-    shuffled_argmax_vals = [
-        int(x)
-        for x in traverse_edges(argmax_vals, shuffle_edges(prepare_edges(argmax_vals)))
-    ]
+    # shuffled_argmax_vals = [
+    #     int(x)
+    #     for x in ds0611.traverse_edges(
+    #         argmax_vals, ds0611.shuffle_edges(ds0611.prepare_edges(argmax_vals))
+    #     )
+    # ]
+    shuffled_argmax_vals = [int(x) for x in ds0611.dinuc_shuffle(argmax_vals)]
     to_return = np.zeros_like(s)
     to_return[list(range(len(s))), shuffled_argmax_vals] = 1
     return to_return
