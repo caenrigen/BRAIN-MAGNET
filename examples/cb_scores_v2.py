@@ -80,13 +80,46 @@ df_sample = df_enrichment.sample(100)
 df_sample.head()
 
 # %% [markdown]
-# # Calculate contribution score, GradientShap with gradient correction
+# # Scratch pad
 #
 
 # %%
-### IMPORTANT MESSAGE!!! In order to run the code on the GPU, I changed the "/trinity/home/rdeng/enhancer/lib/python3.7/site-packages/torch/_tensor.py"
-### return self.numpy() -> return self.cpu().detach().numpy()
-### return self.numpy().astype(dtype, copy=False) -> return self.cpu().detach().numpy().astype(dtype, copy=False)
+df_enrichment.shape
+
+# %%
+(df_enrichment.Seq.str.len() < 980).sum()
+
+# %%
+seq = df_sample.SeqEnc.iloc[-1]
+
+rng = RandomState(random_state)
+_ = ds.dinuc_shuffle(seq, num_shufs=30, rng=rng)
+
+
+# %%
+# WIP
+def make_shuffled_seqs(
+    input_seq_tensor: torch.Tensor,
+    num_shufs: int = 30,
+    rng: RandomState = RandomState(random_state),
+    device: torch.device = device,
+):
+    print(input_seq_tensor.shape)
+    raise RuntimeError("stop here")
+    one_hot = input_seq_tensor.squeeze().permute(1, 0).cpu().numpy()
+    shuffled_seqs = ds.dinuc_shuffle(
+        unpad_one_hot(one_hot), num_shufs=num_shufs, rng=rng
+    )
+    shuffled_seqs_padded = np.asarray(
+        [pad_one_hot(seq) for seq in shuffled_seqs], dtype=np.float32
+    )
+    return torch.tensor(shuffled_seqs_padded).permute(0, 2, 1).to(device)
+
+
+
+# %% [markdown]
+# # Imports
+#
 
 # %%
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
@@ -102,30 +135,35 @@ import deeplift
 # reload(shap)
 
 import deeplift.dinuc_shuffle as ds
+import dinuc_shuffle_v0_6_11_0 as ds0611
+
+
+# %% [markdown]
+# # Calculate contribution score, GradientShap with gradient correction
+#
 
 # %%
-shap.DeepExplainer
-
+### IMPORTANT MESSAGE!!! In order to run the code on the GPU, I changed the "/trinity/home/rdeng/enhancer/lib/python3.7/site-packages/torch/_tensor.py"
+### return self.numpy() -> return self.cpu().detach().numpy()
+### return self.numpy().astype(dtype, copy=False) -> return self.cpu().detach().numpy().astype(dtype, copy=False)
 
 # %%
-def standard_combine_mult_and_diffref(mult, orig_inp, bg_data):
-    to_return = [
-        (mult[l] * (orig_inp[l] - bg_data[l])).mean(0) for l in range(len(orig_inp))
+# this function performs a dinucleotide shuffle of a one-hot encoded sequence
+# It expects the supplied input in the format (length x 4)
+def onehot_dinuc_shuffle(s):
+    s = np.squeeze(s)
+    assert len(s.shape) == 2
+    assert s.shape[1] == 4
+    argmax_vals = "".join([str(x) for x in np.argmax(s, axis=-1)])
+    shuffled_argmax_vals = [
+        int(x)
+        for x in traverse_edges(argmax_vals, shuffle_edges(prepare_edges(argmax_vals)))
     ]
+    to_return = np.zeros_like(s)
+    to_return[list(range(len(s))), shuffled_argmax_vals] = 1
     return to_return
 
 
-# %%
-seq = df_sample.Seq.iloc[0]
-
-rng = RandomState(random_state)
-ds.dinuc_shuffle(seq, num_shufs=None, rng=rng)
-
-# %%
-deeplift.dinuc_shuffle
-
-
-# %%
 # This generates 100 dinuc-shuffled references per sequence
 # In my (Avanti Shrikumar) experience,
 # 100 references per sequence is on the high side; around 10 work well in practice
@@ -163,7 +201,7 @@ def shuffle_several_times(inp):
 # scores are used as input to the importance score clustering algorithm
 # TF-MoDISco (https://github.com/kundajelab/tfmodisco)
 # Hypothetical importance scores are discussed more in this pull request:
-#  https://github.com/kundajelab/deeplift/pull/36
+# https://github.com/kundajelab/deeplift/pull/36
 def combine_mult_and_diffref(mult, orig_inp, bg_data):
     to_return = []
     # Perform some reshaping/transposing because the code was designed
