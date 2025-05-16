@@ -116,6 +116,12 @@ def make_augment_col(
 
 
 def augment_data(df_input: pd.DataFrame, random_state: int = 913):
+    """
+    This was an experiment to augment the data by shifting the sequences within the
+    padded edges.
+    HOWEVER! Augmenting data with differently padded sequences is irrelevant because the
+    convolution layers slide over the DNA sequence!
+    """
     random_obj = Random(random_state)
     seq_lens = df_input.Seq.str.len()
     dfs = [df_input]  # preserve a copy of the original data

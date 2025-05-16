@@ -190,6 +190,7 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
         print("Training interrupted by user")
         return False
 
+    # Free up memory
     model.cpu()
     del model, data_loader, logger, trainer
     gc.collect()
