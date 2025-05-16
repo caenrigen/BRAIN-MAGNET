@@ -49,13 +49,13 @@ def unpad_one_hot(one_hot: np.ndarray):
 
 
 def tensor_reverse_complement(x):
-    # Flip along the length dimension (dim=2).
-    x_rev = torch.flip(x, dims=[2])
+    # Flip along the length dimension (dim=3).
+    x_rev = torch.flip(x, dims=[3])
 
     # Swap A <-> T and C <-> G channels.
     # Channel order is (A=0, C=1, G=2, T=3)
     channel_map = [3, 2, 1, 0]  # T, G, C, A
-    x_revcomp = x_rev[:, channel_map, :]
+    x_revcomp = x_rev[:, channel_map, :, :]
     return x_revcomp
 
 
