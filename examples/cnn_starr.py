@@ -153,22 +153,3 @@ def model_stats(targets, preds):
     pearson = float(stats.pearsonr(targets, preds).statistic)
     spearman = float(stats.spearmanr(targets, preds).statistic)
     return mse, pearson, spearman
-
-
-def pick_checkpoint(df, fold: int, tolerance: float = 0.10, ax=None):
-    df = df[df.fold == fold]
-    df.set_index("epoch", inplace=True)
-    df.sort_index(inplace=True)
-    min_, max_ = df.mse.min(), df.mse.max()
-    if ax:
-        sns.lineplot(data=df, x="epoch", y="mse", hue="set_name", marker="o", ax=ax)
-
-    df = df.pivot(columns="set_name", values="mse")
-    df["diff_train_val"] = (df.train - df.val).abs()
-    df["stop"] = (df.train < df.val) & (df.diff_train_val <= tolerance * df.val)
-    df = df[df.stop]
-    df.sort_values(by=["val", "diff_train_val"], inplace=True)
-    epoch = df.index.values[0]
-    if ax:
-        ax.vlines(epoch, min_, max_, color="red", linestyle="--")
-    return epoch
