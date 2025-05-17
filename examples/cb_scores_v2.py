@@ -146,12 +146,21 @@ reload(shap.explainers.deep.deep_pytorch)
 import deeplift.dinuc_shuffle as ds
 import dinuc_shuffle_v0_6_11_0 as ds0611
 
-
 # %% [markdown]
 # # Calculate contribution score, GradientShap with gradient correction
 #
 
 # %%
+dataset = make_tensor_dataset(
+    df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment"
+)
+dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+dataloader
+
+# %%
+from typing import List
+
+
 # this function performs a dinucleotide shuffle of a one-hot encoded sequence
 # It expects the supplied input in the format (length x 4)
 def onehot_dinuc_shuffle(s):
@@ -172,7 +181,7 @@ def onehot_dinuc_shuffle(s):
     return to_return
 
 
-def from_tensor(t):
+def tensor_to_onehot(t):
     return t.detach().squeeze().transpose(1, 0).cpu().numpy()
 
 
@@ -186,20 +195,20 @@ def onehot_to_tensor_shape(one_hot: np.ndarray):
 # I am using 100 references here just for demonstration purposes.
 # Note that when an input of None is supplied, the function returns a tensor
 # that has the same dimensions as actual input batches
-def shuffle_several_times(inp, num_shufs: int = 30):
+def shuffle_several_times(inp, num_shufs: int = 100, num_bp: int = 1000):
     # I am assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
     if inp is None:
-        return torch.tensor(np.zeros((1, 4, 1, 1000), dtype=np.float32)).to(device)
+        return torch.tensor(np.zeros((1, 4, 1, num_bp), dtype=np.float32)).to(device)
     else:
-        t_seq_1hot = inp[0]
+        tensor_1hot = inp[0]
         # Some reshaping/transposing needs to be performed before calling
         # onehot_dinuc_shuffle becuase the input to the DeepSEA model
         # is in the format (4 x 1 x length) for each sequence, whereas
         # onehot_dinuc_shuffle expects (length x 4)
         it = (
-            onehot_to_tensor_shape(onehot_dinuc_shuffle(from_tensor(t_seq_1hot)))
+            onehot_to_tensor_shape(onehot_dinuc_shuffle(tensor_to_onehot(tensor_1hot)))
             for _ in range(num_shufs)
         )
         to_return = torch.tensor(np.array(list(it), dtype=np.float32)).to(device)
@@ -214,15 +223,25 @@ def shuffle_several_times(inp, num_shufs: int = 30):
 # TF-MoDISco (https://github.com/kundajelab/tfmodisco)
 # Hypothetical importance scores are discussed more in this pull request:
 # https://github.com/kundajelab/deeplift/pull/36
-def combine_mult_and_diffref(mult, orig_inp, bg_data):
+def combine_mult_and_diffref(
+    mult: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, 1, N)
+    orig_inp: List[np.ndarray],  # shape of the (only) element: (4, 1, N)
+    bg_data: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, 1, N)
+):
+    assert len(mult) == len(orig_inp) == len(bg_data) == 1
     to_return = []
+
     # Perform some reshaping/transposing because the code was designed
     # for inputs that are in the format (length x 4), whereas the DeepSEA
     # model has inputs in the format (4 x 1 x length)
-    mult = [x.squeeze().transpose((0, 2, 1)) for x in mult]
-    orig_inp = [x.squeeze().transpose((1, 0)) for x in orig_inp]
-    bg_data = [x.squeeze().transpose((0, 2, 1)) for x in bg_data]
-    for l in range(len(mult)):
+    # List[(num_shufs, 4, 1, N)] -> List[(num_shufs, N, 4)]
+    mult = [x.squeeze().transpose(0, 2, 1) for x in mult]
+    # List[(num_shufs, 4, 1, N)] -> List[(num_shufs, N, 4)]
+    bg_data = [x.squeeze().transpose(0, 2, 1) for x in bg_data]
+    # List[(4, 1, N)] -> List[(N, 4)]
+    orig_inp = [x.squeeze().transpose(1, 0) for x in orig_inp]
+
+    for l_idx in range(len(mult)):
         # At each position in the input sequence, we iterate over the one-hot encoding
         # possibilities (eg: for genomic sequence, this is ACGT i.e.
         # 1000, 0100, 0010 and 0001) and compute the hypothetical
@@ -237,25 +256,41 @@ def combine_mult_and_diffref(mult, orig_inp, bg_data):
         # like if different bases were present in the underlying sequence is that
         # the multipliers are computed once using the original sequence, and are not
         # computed again for each hypothetical sequence.
-        projected_hypothetical_contribs = np.zeros_like(bg_data[l]).astype(np.float32)
-        assert len(orig_inp[l].shape) == 2, orig_inp[l].shape
-        for i in range(orig_inp[l].shape[-1]):
-            hypothetical_input = np.zeros_like(orig_inp[l]).astype(np.float32)
-            hypothetical_input[:, i] = 1.0
-            hypothetical_difference_from_reference = (
-                hypothetical_input[None, :, :] - bg_data[l]
-            )
-            hypothetical_contribs = hypothetical_difference_from_reference * mult[l]
-            projected_hypothetical_contribs[:, :, i] = np.sum(
-                hypothetical_contribs, axis=-1
-            )
-        to_return.append(
-            torch.tensor(
-                np.mean(projected_hypothetical_contribs, axis=0).transpose((1, 0))[
-                    :, None, :
-                ]
-            ).to(device)
-        )
+
+        len_one_hot, num_bp = 4, orig_inp[l_idx].shape[0]
+
+        assert len(orig_inp[l_idx].shape) == 2, orig_inp[l_idx].shape
+        assert orig_inp[l_idx].shape[-1] == len_one_hot, orig_inp[l_idx].shape
+
+        # We don't need zeros, these will be overwritten
+        projected_hyp_contribs = np.empty_like(bg_data[l_idx], dtype=np.float32)
+        hyp_contribs = np.empty_like(bg_data[l_idx], dtype=np.float32)
+
+        ident = np.eye(len_one_hot, dtype=np.float32)
+        for idx_col_1hot in range(len_one_hot):
+            # ##########################################################################
+            # These two lines are more readable, but allocates extra memory:
+            # hyp_seq_1hot = np.zeros_like(orig_inp[l_idx], dtype=np.float32)
+            # # A hypothetical input sequence all made of only one base,
+            # # e.g. for idx_col_1hot == 0: "AAAAAAAAAAA....AAAAAAAAAAAA"
+            # hyp_seq_1hot[:, idx_col_1hot] = 1.0
+
+            # This trick avoids memory allocation:
+            hyp_seq_1hot = np.broadcast_to(ident[idx_col_1hot], (num_bp, 4))
+            # ##########################################################################
+
+            # `hyp_seq_1hot[None, :, :]` shapes it such that it can match the
+            # shape of `bg_data[l_idx]` that has the extra dimension of num_shufs.
+            # It is only a view of the underlying memory, so it is efficient.
+            np.subtract(hyp_seq_1hot[None, :, :], bg_data[l_idx], out=hyp_contribs)
+            np.multiply(hyp_contribs, mult[l_idx], out=hyp_contribs)
+
+            # Sum on the one-hot axis, save directly to `projected_hyp_contribs`
+            hyp_contribs.sum(axis=-1, out=projected_hyp_contribs[:, :, idx_col_1hot])
+
+        # Average on the num_shufs axis
+        p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
+        to_return.append(torch.tensor(p_h_cbs_mean).to(device))
     return to_return
 
 
@@ -305,13 +340,6 @@ def contri_score(dataloader, model_trained: CNNSTARR):
 
 
 # %%
-dataset = make_tensor_dataset(
-    df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment"
-)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-dataloader
-
-# %%
 version = "f9bd95fa"
 fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
 df_models = pd.read_pickle(fp)
@@ -354,6 +382,7 @@ for input_seq, hyp_imp_scores in zip(inputs, shap_explanations):
     # * the hypothetical importance scores and the actual importance scores
     viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
     break
+
 
 # %% [markdown]
 # ## Percentile contribution score
