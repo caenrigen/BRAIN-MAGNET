@@ -267,15 +267,14 @@ def combine_mult_and_diffref(
         hyp_contribs = np.empty_like(bg_data[l_idx], dtype=np.float32)
 
         ident = np.eye(len_one_hot, dtype=np.float32)
+        # Iterate over 4 hypothetical sequences, each made of the same base,
+        # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
         for idx_col_1hot in range(len_one_hot):
             # ##########################################################################
-            # These two lines are more readable, but allocates extra memory:
-            # hyp_seq_1hot = np.zeros_like(orig_inp[l_idx], dtype=np.float32)
-            # # A hypothetical input sequence all made of only one base,
-            # # e.g. for idx_col_1hot == 0: "AAAAAAAAAAA....AAAAAAAAAAAA"
-            # hyp_seq_1hot[:, idx_col_1hot] = 1.0
-
-            # This trick avoids memory allocation:
+            # These two lines allocate extra memory
+            # // hyp_seq_1hot = np.zeros_like(orig_inp[l_idx], dtype=np.float32)
+            # // hyp_seq_1hot[:, idx_col_1hot] = 1.0
+            # This trick avoids memory allocation
             hyp_seq_1hot = np.broadcast_to(ident[idx_col_1hot], (num_bp, 4))
             # ##########################################################################
 
@@ -285,10 +284,12 @@ def combine_mult_and_diffref(
             np.subtract(hyp_seq_1hot[None, :, :], bg_data[l_idx], out=hyp_contribs)
             np.multiply(hyp_contribs, mult[l_idx], out=hyp_contribs)
 
-            # Sum on the one-hot axis, save directly to `projected_hyp_contribs`
+            # Sum on the one-hot axis, save directly to `projected_hyp_contribs`.
+            # The sum is to get the total hypothetical contribution (at that bp)
             hyp_contribs.sum(axis=-1, out=projected_hyp_contribs[:, :, idx_col_1hot])
 
-        # Average on the num_shufs axis
+        # Average on the num_shufs axis to arrive to the final hypothetical
+        # contribution scores (at each bp).
         p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
         to_return.append(torch.tensor(p_h_cbs_mean).to(device))
     return to_return
