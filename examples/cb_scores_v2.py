@@ -170,7 +170,7 @@ import warnings
 
 # this function performs a dinucleotide shuffle of a one-hot encoded sequence
 # It expects the supplied input in the format (length x 4)
-def onehot_dinuc_shuffle(s, random_state=random_state):
+def _onehot_dinuc_shuffle(s, random_state=random_state):
     rng = RandomState(random_state)
     s = np.squeeze(s)
     assert len(s.shape) == 2
@@ -205,8 +205,9 @@ def onehot_to_tensor_shape(one_hot: np.ndarray):
 # that has the same dimensions as actual input batches
 def shuffle_several_times(
     inp: List[torch.Tensor],
-    num_shufs: int = 1000,
+    num_shufs: int = 100,
     num_bp: int = 1000,
+    rng: Optional[RandomState] = None,
 ):
     # I am assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
@@ -215,14 +216,12 @@ def shuffle_several_times(
         return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32)).to(device)
     else:
         tensor_1hot = inp[0]
+        rng = rng or RandomState(913)
         # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
-        it = (
-            onehot_to_tensor_shape(
-                onehot_dinuc_shuffle(tensor_to_onehot(tensor_1hot), random_state=i)
-            )
-            for i in range(num_shufs)
-        )
-        to_return = torch.tensor(np.array(list(it), dtype=np.float32)).to(device)
+        seq_1hot = tensor_to_onehot(tensor_1hot)
+        shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
+        shufs = map(onehot_to_tensor_shape, shufs)
+        to_return = torch.tensor(np.array(list(shufs), dtype=np.float32)).to(device)
         return to_return
 
 

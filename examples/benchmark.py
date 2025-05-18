@@ -79,7 +79,7 @@ n_folds = 5
 #
 
 # %%
-task, version = ("ESC", "5a41adbe")
+task, version = ("ESC", "cc0e922b")
 
 # %%
 y_col = f"{task}_log2_enrichment"
