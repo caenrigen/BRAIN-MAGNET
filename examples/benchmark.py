@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.14.5
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -37,7 +37,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
-from torch.utils.tensorboard import SummaryWriter
 from random import randbytes
 
 # %%
@@ -61,36 +60,44 @@ device = torch.device("mps")  # might have priblems for macOS <14.0
 device
 
 # %%
-# Evaluate the python files within the notebook namespace
-# %run -i auxiliar.py
-# %run -i plots.py
-# %run -i cnn_starr.py
-# %run -i data_module.py
+from importlib import reload
+
+import utils as ut
+import cnn_starr as cnn
+import data_module as dm
+import utils_plots as utp
+
+reload(ut)
+reload(utp)
+reload(cnn)
+reload(dm)
+
 n_folds = 5
 
 # %% [markdown]
 # # Eval models
+#
 
 # %%
-task, version = ("ESC", "b854ab5f")
+task, version = ("ESC", "5a41adbe")
 
 # %%
 y_col = f"{task}_log2_enrichment"
-df_enrichment = load_enrichment_data(
+df_enrichment = dm.load_enrichment_data(
     fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
     y_col=y_col,
-    # drop_indices=OUTLIER_INDICES,
 )
 
 # %%
-fps = list_fold_checkpoints(dp_train=dbmt, version=version, task=task)
-dfc = checkpoint_fps_to_df(fps)
+fps = dm.list_fold_checkpoints(dp_train=dbmt, version=version, task=task)
+dfc = dm.checkpoint_fps_to_df(fps)
 rows = []
 for fold, df in tqdm(dfc.groupby("fold"), total=dfc.fold.nunique(), desc="folds"):
+    assert isinstance(fold, int), fold
     for epoch in tqdm(df.epoch, leave=False, desc="epoch"):
         fp = df[df.epoch == epoch].fp.iloc[0]
-        model = load_model(fp, forward_mode="both", device=device)
-        data_loader = DMSTARR(
+        model = cnn.load_model(fp, forward_mode="both", device=device)
+        data_loader = dm.DMSTARR(
             df_enrichment=df_enrichment,
             sample=None,
             y_col=y_col,
@@ -103,9 +110,9 @@ for fold, df in tqdm(dfc.groupby("fold"), total=dfc.fold.nunique(), desc="folds"
         data_loader.prepare_data()
         for name in ["train", "val"]:
             df_for_loader = getattr(data_loader, f"df_{name}")
-            dl = make_dl(df_for_loader, y_col=y_col)
-            targets, preds = eval_model(model, dl, device=device)
-            mse, pearson, spearman = model_stats(targets, preds)
+            dl = dm.make_dl(df_for_loader, y_col=y_col)
+            targets, preds = cnn.eval_model(model, dl, device=device)
+            mse, pearson, spearman = cnn.model_stats(targets, preds)
             rows.append(
                 {
                     "fold": fold,
@@ -116,11 +123,14 @@ for fold, df in tqdm(dfc.groupby("fold"), total=dfc.fold.nunique(), desc="folds"
                     "spearman": spearman,
                 }
             )
-df_stats = pd.DataFrame(rows)
-df_stats.to_pickle(dbmt / f"starr_{task}" / version / "stats.pkl.bz2")
+    # Save it on each fold so that we can have a look at it quicker while the rest of
+    # the folds it being evaluated.
+    df_stats = pd.DataFrame(rows)
+    df_stats.to_pickle(dbmt / f"starr_{task}" / version / "stats.pkl.bz2")
 
 # %% [markdown]
 # # Benchmark results
+#
 
 # %%
 print(task, version)
@@ -133,6 +143,7 @@ df_stats
 
 # %% [markdown]
 # ## Criteria for stopping the training and picking checkpoint
+#
 
 # %%
 epoch_per_fold = {}
@@ -147,6 +158,7 @@ fig.tight_layout()
 
 # %% [markdown]
 # ## Check if there are significant differences between folds
+#
 
 # %%
 dfs = []
@@ -164,6 +176,7 @@ df
 # %% [markdown]
 # It does not seem worth to use an ensable of models.
 # The deviations between folds is pretty small:
+#
 
 # %%
 max_diff = df.mse.max() - df.mse.min()
@@ -180,6 +193,7 @@ fp_best
 
 # %% [markdown]
 # # Forward vs reverse complement
+#
 
 # %%
 df_enr = df_enrichment.drop(OUTLIER_INDICES)
@@ -195,6 +209,7 @@ for forward_mode in tqdm(["main", "revcomp"]):
 # There can be "outliers" when giving the model only the "main" or the "revcomp" sequence.
 #
 # It seems it is better to average the two values.
+#
 
 # %%
 fig, ax = plt.subplots(1, 1)
@@ -206,6 +221,7 @@ model_stats(x, y)
 
 # %% [markdown]
 # # Scratch
+#
 
 # %%
 t = df_sample.SeqEnc.iloc[0]
@@ -220,6 +236,7 @@ seq_len
 
 # %% [markdown]
 # # Residuals vs SeqLen
+#
 
 # %%
 df = df_enr
@@ -238,6 +255,7 @@ density_scatter(x, y, fig=fig, ax=ax)
 
 # %% [markdown]
 # # GC content
+#
 
 # %%
 df_enrichment["SeqLen"] = df_enrichment.Seq.map(len)
@@ -272,6 +290,7 @@ df_enrichment.head()
 #
 # But this might be an indication that the model actually learnt the patterns and not the
 # noise of the data.
+#
 
 # %%
 df = df_enrichment
@@ -285,6 +304,7 @@ density_scatter(x=gc_content, y=residuals, ax=ax, fig=fig, cmap="plasma")
 
 # %% [markdown]
 # # Check performance per category
+#
 
 # %%
 fps = list_fold_checkpoints(dp_train=dbmt, version=version, task=task)
