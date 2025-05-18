@@ -28,3 +28,17 @@ def density_scatter(x, y, ax, sort=True, bins=100, cmap="magma", **kwargs):
         x, y, z = x[idx], y[idx], z[idx]
 
     ax.scatter(x, y, c=z, cmap=cmap, **kwargs)
+
+
+def plot_weights(
+    inputs,
+    shap_vals,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+):
+    segment = inputs[:, start:end]
+    hyp_imp_scores_segment = shap_vals[:, start:end]
+    # viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
+    # * The actual importance scores can be computed using an element-wise product of
+    # * the hypothetical importance scores and the actual importance scores
+    viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
