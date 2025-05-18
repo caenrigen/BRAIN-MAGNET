@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Literal
+from typing import List, Literal, Optional
 
 import lightning as L
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -27,6 +28,9 @@ class CNNSTARR(L.LightningModule):
         self.forward_mode = forward_mode
         self.log_vars_prefix = log_vars_prefix
         self.loss_fn = loss_fn
+
+        self.prev_epoch: Optional[int] = None
+        self.batches_losses: List[float] = []
 
         self.model = nn.Sequential(
             nn.Conv1d(4, 16, kernel_size=15, padding="same"),
@@ -75,17 +79,31 @@ class CNNSTARR(L.LightningModule):
         inputs = inputs.to(self.device)
         targets = targets.to(self.device)
         out = self(inputs)
-        loss = self.loss_fn(out, targets)
+        loss: float = self.loss_fn(out, targets)
+
+        if suffix == "train":
+            if self.prev_epoch != self.current_epoch:
+                self.prev_epoch = self.current_epoch
+                self.batches_losses = []  # new epoch, reset
+            self.batches_losses.append(loss)
+            # Average across the epoch batches
+            # ! This not equivalent to the loss that is obtained by evaluating the
+            # ! end-of-epoch model on the entire training set. This is because
+            # ! its weights are updated after each batch.
+            loss_log = sum(self.batches_losses) / len(self.batches_losses)
+        else:
+            loss_log = loss
 
         # Log the training loss (this shows up in TensorBoard)
         self.log(
             # This var is used by the EarlyStopping
             f"{self.log_vars_prefix}_loss_{suffix}",
-            loss,
+            loss_log,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
+
         return loss
 
     def training_step(self, batch, batch_idx):

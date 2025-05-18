@@ -111,7 +111,8 @@ device
 # - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
 # - f9bd95fa: no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
 # - 02fe8ebd: no test, 5% val, augment=4, all 16, 15/13/11, swap conv2d->conv1d
-# - 9f6cf870: no test, 5% val, augment=None, all 16, 15/13/11, swap conv2d->conv1d
+# - 5a41adbe: no test, 5% val, augment=None, all 16, 15/13/11, swap conv2d->conv1d
+# - cc0e922b: no test, 5% val, augment=None, all 16, 15/13/11, Conv1D, fixed loss logging
 
 # %%
 import utils as ut
@@ -121,10 +122,8 @@ import data_module as dm
 # %%
 task = "ESC"
 # task = "NSC"
-df_enrichment = load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
-    y_col=f"{task}_log2_enrichment",
-    drop_indices=OUTLIER_INDICES if task == "ESC" else None,
+df_enrichment = dm.load_enrichment_data(
+    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=f"{task}_log2_enrichment"
 )
 df_enrichment.head()
 
@@ -152,14 +151,14 @@ y_col = f"{task}_log2_enrichment"
 
 
 def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
-    model = CNNSTARR(
+    model = cnn.CNNSTARR(
         lr=0.01,
         weight_decay=1e-6,
         log_vars_prefix=task,
     )
     model.to(device)
 
-    data_loader = DMSTARR(
+    data_loader = dm.DMSTARR(
         df_enrichment=df_enrichment,
         sample=sample,
         y_col=y_col,
@@ -180,7 +179,7 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
         max_epochs=max_epochs,
         logger=logger,
         # callbacks=[early_stop],
-        callbacks=[EpochCheckpoint(task=task)],
+        callbacks=[cnn.EpochCheckpoint(task=task)],
     )
 
     try:

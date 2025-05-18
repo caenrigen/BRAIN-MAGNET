@@ -2,6 +2,7 @@ from random import Random
 from functools import partial
 import numpy as np
 import pandas as pd
+import torch
 
 
 def to_uint8(string):
