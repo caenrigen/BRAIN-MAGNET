@@ -91,44 +91,6 @@ df_sample_1000 = df_sample[df_sample.SeqLen == 1000]
 df_sample
 
 # %% [markdown]
-# # Scratch pad
-#
-
-# %%
-df_enrichment.shape
-
-# %%
-(df_enrichment.Seq.str.len() < 980).sum()
-
-# %%
-seq = df_sample.SeqEnc.iloc[-1]
-
-rng = RandomState(random_state)
-_ = ds.dinuc_shuffle(seq, num_shufs=30, rng=rng)
-
-
-# %%
-# WIP
-def make_shuffled_seqs(
-    input_seq_tensor: torch.Tensor,
-    num_shufs: int = 30,
-    rng: RandomState = RandomState(random_state),
-    device: torch.device = device,
-):
-    print(input_seq_tensor.shape)
-    raise RuntimeError("stop here")
-    one_hot = input_seq_tensor.squeeze().permute(1, 0).cpu().numpy()
-    shuffled_seqs = ds.dinuc_shuffle(
-        ut.unpad_one_hot(one_hot), num_shufs=num_shufs, rng=rng
-    )
-    shuffled_seqs_padded = np.asarray(
-        [ut.pad_one_hot(seq) for seq in shuffled_seqs], dtype=np.float32
-    )
-    return torch.tensor(shuffled_seqs_padded).permute(0, 2, 1).to(device)
-
-
-
-# %% [markdown]
 # # SHAP/DeepLIFT imports
 #
 
