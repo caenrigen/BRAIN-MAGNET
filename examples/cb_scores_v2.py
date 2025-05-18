@@ -130,28 +130,8 @@ from typing import List
 import warnings
 
 
-# this function performs a dinucleotide shuffle of a one-hot encoded sequence
-# It expects the supplied input in the format (length x 4)
-def _onehot_dinuc_shuffle(s, random_state=random_state):
-    rng = RandomState(random_state)
-    s = np.squeeze(s)
-    assert len(s.shape) == 2
-    assert s.shape[1] == 4
-    # The argmax identifies the index that == 1 in the one-hot encoded sequence
-    argmax_vals = "".join([str(x) for x in np.argmax(s, axis=-1)])
-    # shuffled_argmax_vals = [
-    #     int(x)
-    #     for x in ds0611.traverse_edges(
-    #         argmax_vals, ds0611.shuffle_edges(ds0611.prepare_edges(argmax_vals))
-    #     )
-    # ]
-    shuffled_argmax_vals = [int(x) for x in ds0611.dinuc_shuffle(argmax_vals, rng=rng)]
-    to_return = np.zeros_like(s, dtype=np.float32)
-    to_return[list(range(len(s))), shuffled_argmax_vals] = 1
-    return to_return
-
-
 def tensor_to_onehot(t):
+    # Detach is because we won't need the gradients
     return t.detach().transpose(1, 0).cpu().numpy()
 
 
@@ -159,43 +139,34 @@ def onehot_to_tensor_shape(one_hot: np.ndarray):
     return one_hot.transpose(1, 0)
 
 
-# This generates 100 dinuc-shuffled references per sequence
-# In my (Avanti Shrikumar) experience,
-# 100 references per sequence is on the high side; around 10 work well in practice
-# I am using 100 references here just for demonstration purposes.
-# Note that when an input of None is supplied, the function returns a tensor
-# that has the same dimensions as actual input batches
-def shuffle_several_times(
+def make_shuffled_1hot_seqs(
     inp: List[torch.Tensor],
-    num_shufs: int = 100,
-    num_bp: int = 1000,
+    # Accoriding to Avanti Shrikumar:
+    # 10 should already work well, 100 is on the high side
+    num_shufs: int = 30,
     rng: Optional[RandomState] = None,
 ):
-    # I am assuming len(inp) == 1 because this function is designed for models with one
+    # Assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
-    assert (inp is None) or len(inp) == 1
+    assert inp is None or len(inp) == 1, inp
+
+    # Internally the `DeepExplainer` performs some checks by using a quick sample and
+    # requires this function to accept `None` and return some sample ref data (zeros).
     if inp is None:
+        num_bp = 10
         return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32)).to(device)
-    else:
-        tensor_1hot = inp[0]
-        rng = rng or RandomState(913)
-        # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
-        seq_1hot = tensor_to_onehot(tensor_1hot)
-        shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
-        shufs = map(onehot_to_tensor_shape, shufs)
-        to_return = torch.tensor(np.array(list(shufs), dtype=np.float32)).to(device)
-        return to_return
+
+    rng = rng or RandomState(913)
+    # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
+    seq_1hot = tensor_to_onehot(inp[0])
+    # Expectes (length x 4) for a one-hot encoded sequence
+    shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
+    shufs = map(onehot_to_tensor_shape, shufs)
+    to_return = torch.tensor(np.array(list(shufs), dtype=np.float32)).to(device)
+    return to_return
 
 
-# This combine_mult_and_diffref function can be used to generate hypothetical
-# importance scores for one-hot encoded sequence.
-# Hypothetical scores can be thought of as quick estimates of what the
-# contribution *would have been* if a different base were present. Hypothetical
-# scores are used as input to the importance score clustering algorithm
-# TF-MoDISco (https://github.com/kundajelab/tfmodisco)
-# Hypothetical importance scores are discussed more in this pull request:
-# https://github.com/kundajelab/deeplift/pull/36
-def combine_mult_and_diffref(
+def combine_multipliers_and_diff_from_ref(
     mult: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
     orig_inp: List[np.ndarray],  # shape of the (only) element: (4, N)
     bg_data: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
@@ -213,21 +184,6 @@ def combine_mult_and_diffref(
     orig_inp = [x.transpose(1, 0) for x in orig_inp]
 
     for l_idx in range(len(mult)):
-        # At each position in the input sequence, we iterate over the one-hot encoding
-        # possibilities (eg: for genomic sequence, this is ACGT i.e.
-        # 1000, 0100, 0010 and 0001) and compute the hypothetical
-        # difference-from-reference in each case. We then multiply the hypothetical
-        # differences-from-reference with the multipliers to get the hypothetical contributions.
-        # For each of the one-hot encoding possibilities,
-        # the hypothetical contributions are then summed across the ACGT axis to estimate
-        # the total hypothetical contribution of each position. This per-position hypothetical
-        # contribution is then assigned ("projected") onto whichever base was present in the
-        # hypothetical sequence.
-        # The reason this is a fast estimate of what the importance scores *would* look
-        # like if different bases were present in the underlying sequence is that
-        # the multipliers are computed once using the original sequence, and are not
-        # computed again for each hypothetical sequence.
-
         len_one_hot, num_bp = 4, orig_inp[l_idx].shape[0]
 
         assert len(orig_inp[l_idx].shape) == 2, orig_inp[l_idx].shape
@@ -274,10 +230,9 @@ warnings.filterwarnings(
 )
 
 
-# calculate contribution score, and save it as npy for TF-modisco
-def contri_score(dataloader, model_trained: cnn.CNNSTARR):
-    whole_inputs = []
-    whole_shap_vals = []
+def calc_contrib_scores(dataloader, model_trained: cnn.CNNSTARR, device: torch.device):
+    inputs_all = []
+    shap_vals_all = []
 
     for batch, data in enumerate(dataloader):
         inputs, _targets = data
@@ -287,41 +242,27 @@ def contri_score(dataloader, model_trained: cnn.CNNSTARR):
         # calculate shap
         e = shap.DeepExplainer(
             model=model_trained,
-            data=shuffle_several_times,
-            combine_mult_and_diffref=combine_mult_and_diffref,
+            data=make_shuffled_1hot_seqs,
+            combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
         )
 
+        # These will be consumed by TF-MoDISco
         shap_vals = e.shap_values(inputs)
+        inputs = inputs.detach()
 
-        # # ? what is this? commend in the wrong place? outdated?
-        # process gradients with gradient correction (Majdandzic et al. 2022)
-        inputs = inputs.detach().cpu().numpy()
+        inputs_all.append(inputs)
+        shap_vals_all.append(shap_vals)
 
-        whole_inputs.append(inputs)
-        whole_shap_vals.append(shap_vals)
+    inputs_all = torch.cat(inputs_all, dim=0).cpu().numpy()
 
-    whole_inputs = np.concatenate(whole_inputs, axis=0)
-    # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_inputs = whole_inputs
+    shap_vals_all = np.concatenate(shap_vals_all, axis=0)
 
-    whole_shap_vals = np.concatenate(whole_shap_vals, axis=0)
-    # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_shap_vals = whole_shap_vals
-
-    # np.save(
-    #     "contri_score/shap_vals_" + task + ".npy",
-    #     whole_shap_vals,
-    # )
-    # np.save(
-    #     "contri_score/inp_" + task + ".npy",
-    #     whole_inputs,
-    # )
-    return whole_inputs, whole_shap_vals
+    return inputs_all, shap_vals_all
 
 
 # %%
 # version, fold = "f9bd95fa", 0  # Conv2D
-version, fold = "5a41adbe", 2  # Conv1D
+version, fold = "cc0e922b", 0  # Conv1D
 fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
 df_models = pd.read_pickle(fp)
 fig, ax = plt.subplots(1, 1)
@@ -343,7 +284,9 @@ model_trained = cnn.load_model(
 model_trained
 
 # %%
-inputs, shap_vals = contri_score(dataloader, model_trained=model_trained)
+inputs, shap_vals = calc_contrib_scores(
+    dataloader, model_trained=model_trained, device=device
+)
 
 # %%
 # dp = dbm / "cb_tmp" / "shap_vals_conv2d.npz"
@@ -372,7 +315,7 @@ for fp in fps:
     loaded = np.load(fp)
     inputs, shap_vals = loaded["inputs"], loaded["shap_vals"]
     seq_idx = 0
-    plot_weights(inputs[seq_idx], shap_vals[seq_idx], 750, 1000)
+    plot_weights(inputs[seq_idx], shap_vals[seq_idx], 12, 1012)
 
 # %% [markdown]
 # ## Percentile contribution score
