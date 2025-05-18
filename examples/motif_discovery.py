@@ -7,8 +7,8 @@ import torch
 
 # Original repo:
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
-# This fork fixes an issue for data that is on GPU/MPS
-# https://github.com/caenrigen/shap/commit/0db4abbc916688f1d937ca1f62003e4a149ba0df
+# Mirror over here:
+# https://github.com/caenrigen/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
 import shap
 
 # https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
@@ -25,6 +25,11 @@ reload(shap)
 reload(ds)
 
 reload(cnn)
+
+# Specify handler for Flatten used in our model, otherwise `shap_values` will emit
+# warnings and (potentially) use an incorrect handler.
+dpyt = shap.explainers.deep.deep_pytorch
+dpyt.op_handler["Flatten"] = dpyt.passthrough
 
 
 def tensor_to_onehot(t):
@@ -67,7 +72,10 @@ def combine_multipliers_and_diff_from_ref(
     mult: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
     orig_inp: List[np.ndarray],  # shape of the (only) element: (4, N)
     bg_data: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
-    device: torch.device,
+    # ! The data output by this function is used only on "cpu" device inside
+    # ! the shap module's. There is no need to move it to GPU/MPS, that will create
+    # ! errors device-related errors.
+    # device: torch.device,
 ):
     assert len(mult) == len(orig_inp) == len(bg_data) == 1
     to_return = []
@@ -116,7 +124,7 @@ def combine_multipliers_and_diff_from_ref(
         # Average on the num_shufs axis to arrive to the final hypothetical
         # contribution scores (at each bp).
         p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
-        to_return.append(torch.tensor(p_h_cbs_mean).to(device))
+        to_return.append(torch.tensor(p_h_cbs_mean))
     return to_return
 
 
