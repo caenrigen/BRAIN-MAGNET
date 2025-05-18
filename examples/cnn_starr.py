@@ -9,6 +9,8 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import mean_squared_error
 from scipy import stats
 
+import utils as ut
+
 
 class CNNSTARR(L.LightningModule):
     def __init__(
@@ -59,10 +61,10 @@ class CNNSTARR(L.LightningModule):
         if self.forward_mode == "main":
             res = self.model(x)
         elif self.forward_mode == "revcomp":
-            res = self.model(tensor_reverse_complement(x))
+            res = self.model(ut.tensor_reverse_complement(x))
         elif self.forward_mode == "both":
             res_fwd = self.model(x)
-            res_rc = self.model(tensor_reverse_complement(x))
+            res_rc = self.model(ut.tensor_reverse_complement(x))
             res = (res_fwd + res_rc) / 2  # take the average
         else:
             raise ValueError(f"{self.forward_mode = }")

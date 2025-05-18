@@ -10,6 +10,8 @@ import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
 import seaborn as sns
 
+import utils as ut
+
 
 def bins(s, n: int = 8):
     return pd.cut(s, bins=n, labels=False)
@@ -67,7 +69,7 @@ def load_enrichment_data(
         # "SeqRevComp",
     ]
     df = pd.read_csv(fp, usecols=usecols)
-    df["SeqEnc"] = df.Seq.map(one_hot_encode).map(pad_one_hot)
+    df["SeqEnc"] = df.Seq.map(ut.one_hot_encode).map(ut.pad_one_hot)
     if drop_indices:
         df.drop(drop_indices, inplace=True)
     return df
@@ -141,7 +143,7 @@ class DMSTARR(L.LightningDataModule):
                 stratify=self.bins_func(self.df[self.y_col]),
             )
         if self.augment and self.df_test:
-            self.df_test = augment_data(self.df_test, random_state=self.random_state)
+            self.df_test = ut.augment_data(self.df_test, random_state=self.random_state)
 
         if self.n_folds is not None:
             kf = StratifiedKFold(
@@ -164,12 +166,16 @@ class DMSTARR(L.LightningDataModule):
             )
 
         if self.augment:
-            self.df_train = augment_data(self.df_train, random_state=self.random_state)
+            self.df_train = ut.augment_data(
+                self.df_train, random_state=self.random_state
+            )
             if callable(self.augment):
                 # Augment the validation set as well, otherwise the validation loss is
                 # not comparable to the training loss when the augment changes the
                 # targets distribution.
-                self.df_val = augment_data(self.df_val, random_state=self.random_state)
+                self.df_val = ut.augment_data(
+                    self.df_val, random_state=self.random_state
+                )
 
     def setup(self, stage: Optional[str] = None):
         func = partial(make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col)

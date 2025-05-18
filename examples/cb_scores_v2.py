@@ -14,10 +14,14 @@
 # ---
 
 # %%
-# Evaluate the python files within the notebook namespace
-# %run -i auxiliar.py
-# %run -i cnn_starr.py
-# %run -i data_module.py
+from importlib import reload
+import utils as ut
+import cnn_starr as cnn
+import data_module as dm
+
+_ = reload(ut)
+_ = reload(cnn)
+_ = reload(dm)
 
 # %%
 import os
@@ -70,7 +74,7 @@ device
 # %%
 task = "ESC"
 # task = "NSC"
-df_enrichment = load_enrichment_data(
+df_enrichment = dm.load_enrichment_data(
     fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
     y_col=f"{task}_log2_enrichment",
 )
@@ -80,8 +84,10 @@ df_enrichment.head()
 df_enrichment["SeqLen"] = df_enrichment.Seq.str.len()
 
 # %%
-df_sample = df_enrichment.loc[OUTLIER_INDICES].copy()
-df_sample_1000 = df_sample[df_sample.SeqLen == 1000].copy()
+df_sample = df_enrichment.loc[dm.OUTLIER_INDICES].sort_values(
+    by="SeqLen", ascending=False
+)
+df_sample_1000 = df_sample[df_sample.SeqLen == 1000]
 df_sample
 
 # %% [markdown]
@@ -113,10 +119,10 @@ def make_shuffled_seqs(
     raise RuntimeError("stop here")
     one_hot = input_seq_tensor.squeeze().permute(1, 0).cpu().numpy()
     shuffled_seqs = ds.dinuc_shuffle(
-        unpad_one_hot(one_hot), num_shufs=num_shufs, rng=rng
+        ut.unpad_one_hot(one_hot), num_shufs=num_shufs, rng=rng
     )
     shuffled_seqs_padded = np.asarray(
-        [pad_one_hot(seq) for seq in shuffled_seqs], dtype=np.float32
+        [ut.pad_one_hot(seq) for seq in shuffled_seqs], dtype=np.float32
     )
     return torch.tensor(shuffled_seqs_padded).permute(0, 2, 1).to(device)
 
@@ -133,17 +139,17 @@ def make_shuffled_seqs(
 import shap
 
 # https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
-import deeplift
+import deeplift.dinuc_shuffle as ds
+from deeplift.visualization import viz_sequence
 
 from importlib import reload
 
-reload(shap)
-reload(shap.explainers)
-reload(shap.explainers.deep)
+# Must be in reverse order to work properly
 reload(shap.explainers.deep.deep_pytorch)
+reload(shap.explainers.deep)
+reload(shap.explainers)
+reload(shap)
 
-
-import deeplift.dinuc_shuffle as ds
 import dinuc_shuffle_v0_6_11_0 as ds0611
 
 # %% [markdown]
@@ -151,7 +157,7 @@ import dinuc_shuffle_v0_6_11_0 as ds0611
 #
 
 # %%
-dataset = make_tensor_dataset(
+dataset = dm.make_tensor_dataset(
     df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment"
 )
 dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
@@ -159,6 +165,7 @@ dataloader
 
 # %%
 from typing import List
+import warnings
 
 
 # this function performs a dinucleotide shuffle of a one-hot encoded sequence
@@ -195,7 +202,11 @@ def onehot_to_tensor_shape(one_hot: np.ndarray):
 # I am using 100 references here just for demonstration purposes.
 # Note that when an input of None is supplied, the function returns a tensor
 # that has the same dimensions as actual input batches
-def shuffle_several_times(inp, num_shufs: int = 100, num_bp: int = 1000):
+def shuffle_several_times(
+    inp: List[torch.Tensor],
+    num_shufs: int = 30,
+    num_bp: int = 1000,
+):
     # I am assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
@@ -295,10 +306,18 @@ def combine_mult_and_diffref(
     return to_return
 
 
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module="torch.nn.modules.module",
+    message=".*register_full_backward_hook.*",
+)
+
+
 # calculate contribution score, and save it as npy for TF-modisco
-def contri_score(dataloader, model_trained: CNNSTARR):
+def contri_score(dataloader, model_trained: cnn.CNNSTARR):
     whole_inputs = []
-    whole_shap_explanations = []
+    whole_shap_vals = []
 
     for batch, data in enumerate(dataloader):
         inputs, _targets = data
@@ -312,32 +331,32 @@ def contri_score(dataloader, model_trained: CNNSTARR):
             combine_mult_and_diffref=combine_mult_and_diffref,
         )
 
-        shap_explanations = e.shap_values(inputs)
+        shap_vals = e.shap_values(inputs)
 
         # # ? what is this? commend in the wrong place? outdated?
         # process gradients with gradient correction (Majdandzic et al. 2022)
         inputs = inputs.detach().cpu().numpy()
 
         whole_inputs.append(inputs)
-        whole_shap_explanations.append(shap_explanations)
+        whole_shap_vals.append(shap_vals)
 
     whole_inputs = np.concatenate(whole_inputs, axis=0)
     # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
     whole_inputs = whole_inputs.squeeze()
 
-    whole_shap_explanations = np.concatenate(whole_shap_explanations, axis=0)
+    whole_shap_vals = np.concatenate(whole_shap_vals, axis=0)
     # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_shap_explanations = whole_shap_explanations.squeeze()
+    whole_shap_vals = whole_shap_vals.squeeze()
 
     # np.save(
-    #     "contri_score/shap_explanations_" + task + ".npy",
-    #     whole_shap_explanations,
+    #     "contri_score/shap_vals_" + task + ".npy",
+    #     whole_shap_vals,
     # )
     # np.save(
     #     "contri_score/inp_" + task + ".npy",
     #     whole_inputs,
     # )
-    return whole_inputs, whole_shap_explanations
+    return whole_inputs, whole_shap_vals
 
 
 # %%
@@ -346,7 +365,7 @@ fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
 df_models = pd.read_pickle(fp)
 fig, ax = plt.subplots(1, 1)
 fold = 0
-epoch = pick_checkpoint(df_models, fold=fold, ax=ax)
+epoch = dm.pick_checkpoint(df_models, fold=fold, ax=ax)
 fold, epoch
 
 
@@ -357,7 +376,7 @@ fp_model_checkpoint
 
 
 # %%
-model_trained = load_model(
+model_trained = cnn.load_model(
     fp=fp_model_checkpoint,
     device=device,
     forward_mode="main",
@@ -365,24 +384,34 @@ model_trained = load_model(
 model_trained
 
 # %%
-inputs, shap_explanations = contri_score(dataloader, model_trained=model_trained)
+inputs, shap_vals = contri_score(dataloader, model_trained=model_trained)
 
 # %%
-inputs.shape, shap_explanations.shape
+# dp = dbm / "cb_tmp" / "shap_vals_conv2d.npz"
+dp = dbm / "cb_tmp" / "shap_vals_conv1d.npz"
+np.savez_compressed(dp, inputs=inputs, shap_vals=shap_vals)
+
+# %%
+inputs.shape, shap_vals.shape
 
 
 # %%
-from deeplift.visualization import viz_sequence
-
-for input_seq, hyp_imp_scores in zip(inputs, shap_explanations):
-    start, end = 750, 1000
-    segment = input_seq[:, start:end]
-    hyp_imp_scores_segment = hyp_imp_scores[:, start:end]
-    viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
+def plot_weights(inputs, shap_vals, start: int, end: int):
+    segment = inputs[:, start:end]
+    hyp_imp_scores_segment = shap_vals[:, start:end]
+    # viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
     # * The actual importance scores can be computed using an element-wise product of
     # * the hypothetical importance scores and the actual importance scores
     viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
-    break
+
+
+dp = dbm / "cb_tmp" / "shap_vals_conv2d.npz"
+
+loaded = np.load(dp)
+inputs, shap_vals = loaded["inputs"], loaded["shap_vals"]
+
+seq_idx = 0
+plot_weights(inputs[seq_idx], shap_vals[seq_idx], 750, 1000)
 
 
 # %% [markdown]

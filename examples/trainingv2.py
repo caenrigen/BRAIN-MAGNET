@@ -114,10 +114,9 @@ device
 # - 9f6cf870: no test, 5% val, augment=None, all 16, 15/13/11, swap conv2d->conv1d
 
 # %%
-# Evaluate the python files within the notebook namespace
-# %run -i auxiliar.py
-# %run -i cnn_starr.py
-# %run -i data_module.py
+import utils as ut
+import cnn_starr as cnn
+import data_module as dm
 
 # %%
 task = "ESC"
