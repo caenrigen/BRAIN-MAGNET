@@ -167,6 +167,7 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
         augment=augment,
         frac_for_test=frac_for_test,
         frac_for_val=frac_for_val,
+        device=device,
     )
 
     logger = TensorBoardLogger(

@@ -66,10 +66,12 @@ def make_shuffled_1hot_seqs(
 
     # dinuc_shuffle expects (length x 4) for a one-hot encoded sequence
     seq_1hot = tensor_to_onehot(inp[0])
-    # If not unpadded the shuffled sequences will move within the padded region,
-    # this might accumulate small uneccessary errors
+    # With the implementation of dinuc_shuffle used here, if not unpadded,
+    # the shuffled sequences will "move" into the padded region,
+    # since we are not experts on the SHAP DeepExplainer code, we stay safe and unpad
+    # before shuffling. Note that the shuffled sequences are not really passed through
+    # the model. These are used only for hypothetical contributions estimate.
     shufs = ds.dinuc_shuffle(ut.unpad_one_hot(seq_1hot), num_shufs=num_shufs, rng=rng)
-    # shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
     # Pad back to the original length
     shufs = map(partial(ut.pad_one_hot, to=seq_1hot.shape[0]), shufs)
     shufs = map(onehot_to_tensor_shape, shufs)

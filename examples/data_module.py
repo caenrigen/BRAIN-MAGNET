@@ -57,6 +57,7 @@ def load_enrichment_data(
     fp: Path,
     y_col: str = "NSC_log2_enrichment",
     drop_indices: Optional[List[int]] = None,
+    pad_to: int = 1000,
 ):
     usecols = [
         # "Chr",
@@ -70,7 +71,7 @@ def load_enrichment_data(
     ]
     df = pd.read_csv(fp, usecols=usecols)
     df["SeqLen"] = df.Seq.str.len()
-    df["SeqEnc"] = df.Seq.map(ut.one_hot_encode).map(ut.pad_one_hot)
+    df["SeqEnc"] = df.Seq.map(ut.one_hot_encode).map(partial(ut.pad_one_hot, to=pad_to))
     if drop_indices:
         df.drop(drop_indices, inplace=True)
     return df
