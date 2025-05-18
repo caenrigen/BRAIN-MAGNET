@@ -189,11 +189,11 @@ def onehot_dinuc_shuffle(s):
 
 
 def tensor_to_onehot(t):
-    return t.detach().squeeze().transpose(1, 0).cpu().numpy()
+    return t.detach().transpose(1, 0).cpu().numpy()
 
 
 def onehot_to_tensor_shape(one_hot: np.ndarray):
-    return one_hot.transpose(1, 0)[:, None, :]
+    return one_hot.transpose(1, 0)
 
 
 # This generates 100 dinuc-shuffled references per sequence
@@ -211,13 +211,10 @@ def shuffle_several_times(
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
     if inp is None:
-        return torch.tensor(np.zeros((1, 4, 1, num_bp), dtype=np.float32)).to(device)
+        return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32)).to(device)
     else:
         tensor_1hot = inp[0]
-        # Some reshaping/transposing needs to be performed before calling
-        # onehot_dinuc_shuffle becuase the input to the DeepSEA model
-        # is in the format (4 x 1 x length) for each sequence, whereas
-        # onehot_dinuc_shuffle expects (length x 4)
+        # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
         it = (
             onehot_to_tensor_shape(onehot_dinuc_shuffle(tensor_to_onehot(tensor_1hot)))
             for _ in range(num_shufs)
@@ -235,22 +232,21 @@ def shuffle_several_times(
 # Hypothetical importance scores are discussed more in this pull request:
 # https://github.com/kundajelab/deeplift/pull/36
 def combine_mult_and_diffref(
-    mult: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, 1, N)
-    orig_inp: List[np.ndarray],  # shape of the (only) element: (4, 1, N)
-    bg_data: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, 1, N)
+    mult: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
+    orig_inp: List[np.ndarray],  # shape of the (only) element: (4, N)
+    bg_data: List[np.ndarray],  # shape of the (only) element: (num_shufs, 4, N)
 ):
     assert len(mult) == len(orig_inp) == len(bg_data) == 1
     to_return = []
 
     # Perform some reshaping/transposing because the code was designed
-    # for inputs that are in the format (length x 4), whereas the DeepSEA
-    # model has inputs in the format (4 x 1 x length)
-    # List[(num_shufs, 4, 1, N)] -> List[(num_shufs, N, 4)]
-    mult = [x.squeeze().transpose(0, 2, 1) for x in mult]
-    # List[(num_shufs, 4, 1, N)] -> List[(num_shufs, N, 4)]
-    bg_data = [x.squeeze().transpose(0, 2, 1) for x in bg_data]
-    # List[(4, 1, N)] -> List[(N, 4)]
-    orig_inp = [x.squeeze().transpose(1, 0) for x in orig_inp]
+    # for inputs that are in the format (length x 4)
+    # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
+    mult = [x.transpose(0, 2, 1) for x in mult]
+    # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
+    bg_data = [x.transpose(0, 2, 1) for x in bg_data]
+    # List[(4, N)] -> List[(N, 4)]
+    orig_inp = [x.transpose(1, 0) for x in orig_inp]
 
     for l_idx in range(len(mult)):
         # At each position in the input sequence, we iterate over the one-hot encoding
@@ -342,11 +338,11 @@ def contri_score(dataloader, model_trained: cnn.CNNSTARR):
 
     whole_inputs = np.concatenate(whole_inputs, axis=0)
     # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_inputs = whole_inputs.squeeze()
+    whole_inputs = whole_inputs
 
     whole_shap_vals = np.concatenate(whole_shap_vals, axis=0)
     # remove additional dimention for TFmodisco, (Batch, 4, 1, 1000)->(Batch, 4, 1000)
-    whole_shap_vals = whole_shap_vals.squeeze()
+    whole_shap_vals = whole_shap_vals
 
     # np.save(
     #     "contri_score/shap_vals_" + task + ".npy",
