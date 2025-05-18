@@ -129,7 +129,7 @@ def make_shuffled_seqs(
 
 
 # %% [markdown]
-# # Imports
+# # SHAP/DeepLIFT imports
 #
 
 # %%
@@ -170,7 +170,8 @@ import warnings
 
 # this function performs a dinucleotide shuffle of a one-hot encoded sequence
 # It expects the supplied input in the format (length x 4)
-def onehot_dinuc_shuffle(s):
+def onehot_dinuc_shuffle(s, random_state=random_state):
+    rng = RandomState(random_state)
     s = np.squeeze(s)
     assert len(s.shape) == 2
     assert s.shape[1] == 4
@@ -182,8 +183,8 @@ def onehot_dinuc_shuffle(s):
     #         argmax_vals, ds0611.shuffle_edges(ds0611.prepare_edges(argmax_vals))
     #     )
     # ]
-    shuffled_argmax_vals = [int(x) for x in ds0611.dinuc_shuffle(argmax_vals)]
-    to_return = np.zeros_like(s).astype(np.float32)
+    shuffled_argmax_vals = [int(x) for x in ds0611.dinuc_shuffle(argmax_vals, rng=rng)]
+    to_return = np.zeros_like(s, dtype=np.float32)
     to_return[list(range(len(s))), shuffled_argmax_vals] = 1
     return to_return
 
@@ -204,7 +205,7 @@ def onehot_to_tensor_shape(one_hot: np.ndarray):
 # that has the same dimensions as actual input batches
 def shuffle_several_times(
     inp: List[torch.Tensor],
-    num_shufs: int = 30,
+    num_shufs: int = 1000,
     num_bp: int = 1000,
 ):
     # I am assuming len(inp) == 1 because this function is designed for models with one
@@ -216,8 +217,10 @@ def shuffle_several_times(
         tensor_1hot = inp[0]
         # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
         it = (
-            onehot_to_tensor_shape(onehot_dinuc_shuffle(tensor_to_onehot(tensor_1hot)))
-            for _ in range(num_shufs)
+            onehot_to_tensor_shape(
+                onehot_dinuc_shuffle(tensor_to_onehot(tensor_1hot), random_state=i)
+            )
+            for i in range(num_shufs)
         )
         to_return = torch.tensor(np.array(list(it), dtype=np.float32)).to(device)
         return to_return
@@ -356,14 +359,13 @@ def contri_score(dataloader, model_trained: cnn.CNNSTARR):
 
 
 # %%
-version = "f9bd95fa"
+# version, fold = "f9bd95fa", 0  # Conv2D
+version, fold = "5a41adbe", 2  # Conv1D
 fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
 df_models = pd.read_pickle(fp)
 fig, ax = plt.subplots(1, 1)
-fold = 0
 epoch = dm.pick_checkpoint(df_models, fold=fold, ax=ax)
 fold, epoch
-
 
 # %%
 dp_checkpoints = dbmt / f"starr_{task}" / version / f"fold_{fold}" / "epoch_checkpoints"
@@ -401,14 +403,15 @@ def plot_weights(inputs, shap_vals, start: int, end: int):
     viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
 
 
-dp = dbm / "cb_tmp" / "shap_vals_conv2d.npz"
 
-loaded = np.load(dp)
-inputs, shap_vals = loaded["inputs"], loaded["shap_vals"]
-
-seq_idx = 0
-plot_weights(inputs[seq_idx], shap_vals[seq_idx], 750, 1000)
-
+# %%
+dp = dbm / "cb_tmp"
+fps = [dp / "shap_vals_conv2d.npz", dp / "shap_vals_conv1d.npz"]
+for fp in fps:
+    loaded = np.load(fp)
+    inputs, shap_vals = loaded["inputs"], loaded["shap_vals"]
+    seq_idx = 0
+    plot_weights(inputs[seq_idx], shap_vals[seq_idx], 750, 1000)
 
 # %% [markdown]
 # ## Percentile contribution score
