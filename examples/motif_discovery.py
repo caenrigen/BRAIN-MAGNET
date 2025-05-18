@@ -11,9 +11,13 @@ import torch
 # https://github.com/caenrigen/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
 import shap
 
+# Original repo:
 # https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
+# Mirror over here:
+# https://github.com/caenrigen/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
 import deeplift.dinuc_shuffle as ds
 
+import utils as ut
 import cnn_starr as cnn
 
 # Reload in reverse order to be sure it works as intended
@@ -24,6 +28,7 @@ reload(shap)
 
 reload(ds)
 
+reload(ut)
 reload(cnn)
 
 # Specify handler for Flatten used in our model, otherwise `shap_values` will emit
@@ -57,14 +62,20 @@ def make_shuffled_1hot_seqs(
     # requires this function to accept `None` and return some sample ref data (zeros).
     if inp is None:
         num_bp = 10
-        return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32)).to(device)
+        return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32), device=device)
 
-    # Some reshaping/transposing, onehot_dinuc_shuffle expects (length x 4)
+    # dinuc_shuffle expects (length x 4) for a one-hot encoded sequence
     seq_1hot = tensor_to_onehot(inp[0])
-    # Expectes (length x 4) for a one-hot encoded sequence
-    shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
+    # If not unpadded the shuffled sequences will move within the padded region,
+    # this might accumulate small uneccessary errors
+    shufs = ds.dinuc_shuffle(ut.unpad_one_hot(seq_1hot), num_shufs=num_shufs, rng=rng)
+    # shufs = ds.dinuc_shuffle(seq_1hot, num_shufs=num_shufs, rng=rng)
+    # Pad back to the original length
+    shufs = map(partial(ut.pad_one_hot, to=seq_1hot.shape[0]), shufs)
     shufs = map(onehot_to_tensor_shape, shufs)
-    to_return = torch.tensor(np.array(list(shufs), dtype=np.float32)).to(device)
+    # Putting this data to a device != "cpu" is futile and likely add overhead,
+    # but the deep_pytorch code is spaghetti and won't work otherwise
+    to_return = torch.tensor(np.array(list(shufs), dtype=np.float32), device=device)
     return to_return
 
 
@@ -77,55 +88,59 @@ def combine_multipliers_and_diff_from_ref(
     # ! errors device-related errors.
     # device: torch.device,
 ):
-    assert len(mult) == len(orig_inp) == len(bg_data) == 1
-    to_return = []
+    # DeepExaplainer passes in a list of length 1 for our models that have only one
+    # input mode (i.e. just sequence as the input mode)
+    for arg in mult, orig_inp, bg_data:
+        assert len(arg) == 1, arg
+        assert isinstance(arg, list), type(arg)
+    mult_ = mult[0]
+    orig_inp_ = orig_inp[0]
+    bg_data_ = bg_data[0]
 
     # Perform some reshaping/transposing because the code was designed
     # for inputs that are in the format (length x 4)
     # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
-    mult = [x.transpose(0, 2, 1) for x in mult]
+    mult_ = mult_.transpose(0, 2, 1)
     # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
-    bg_data = [x.transpose(0, 2, 1) for x in bg_data]
+    bg_data_ = bg_data_.transpose(0, 2, 1)
     # List[(4, N)] -> List[(N, 4)]
-    orig_inp = [x.transpose(1, 0) for x in orig_inp]
+    orig_inp_ = orig_inp_.transpose(1, 0)
 
-    for l_idx in range(len(mult)):
-        len_one_hot, num_bp = 4, orig_inp[l_idx].shape[0]
+    len_one_hot, num_bp = 4, orig_inp_.shape[0]
 
-        assert len(orig_inp[l_idx].shape) == 2, orig_inp[l_idx].shape
-        assert orig_inp[l_idx].shape[-1] == len_one_hot, orig_inp[l_idx].shape
+    assert len(orig_inp_.shape) == 2, orig_inp_.shape
+    assert orig_inp_.shape[-1] == len_one_hot, orig_inp_.shape
 
-        # We don't need zeros, these will be overwritten
-        projected_hyp_contribs = np.empty_like(bg_data[l_idx], dtype=np.float32)
-        hyp_contribs = np.empty_like(bg_data[l_idx], dtype=np.float32)
+    # We don't need zeros, these will be overwritten
+    projected_hyp_contribs = np.empty_like(bg_data_, dtype=np.float32)
+    hyp_contribs = np.empty_like(bg_data_, dtype=np.float32)
 
-        ident = np.eye(len_one_hot, dtype=np.float32)
-        # Iterate over 4 hypothetical sequences, each made of the same base,
-        # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
-        for idx_col_1hot in range(len_one_hot):
-            # ##########################################################################
-            # These two lines allocate extra memory
-            # // hyp_seq_1hot = np.zeros_like(orig_inp[l_idx], dtype=np.float32)
-            # // hyp_seq_1hot[:, idx_col_1hot] = 1.0
-            # This trick avoids memory allocation
-            hyp_seq_1hot = np.broadcast_to(ident[idx_col_1hot], (num_bp, 4))
-            # ##########################################################################
+    ident = np.eye(len_one_hot, dtype=np.float32)
+    # Iterate over 4 hypothetical sequences, each made of the same base,
+    # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
+    for idx_col_1hot in range(len_one_hot):
+        # ##########################################################################
+        # These two lines allocate extra memory
+        # // hyp_seq_1hot = np.zeros_like(orig_inp0, dtype=np.float32)
+        # // hyp_seq_1hot[:, idx_col_1hot] = 1.0
+        # This trick avoids memory allocation
+        hyp_seq_1hot = np.broadcast_to(ident[idx_col_1hot], (num_bp, 4))
+        # ##########################################################################
 
-            # `hyp_seq_1hot[None, :, :]` shapes it such that it can match the
-            # shape of `bg_data[l_idx]` that has the extra dimension of num_shufs.
-            # It is only a view of the underlying memory, so it is efficient.
-            np.subtract(hyp_seq_1hot[None, :, :], bg_data[l_idx], out=hyp_contribs)
-            np.multiply(hyp_contribs, mult[l_idx], out=hyp_contribs)
+        # `hyp_seq_1hot[None, :, :]` shapes it such that it can match the
+        # shape of `bg_data` that has the extra dimension of num_shufs.
+        # It is only a view of the underlying memory, so it is efficient.
+        np.subtract(hyp_seq_1hot[None, :, :], bg_data_, out=hyp_contribs)
+        np.multiply(hyp_contribs, mult_, out=hyp_contribs)
 
-            # Sum on the one-hot axis, save directly to `projected_hyp_contribs`.
-            # The sum is to get the total hypothetical contribution (at that bp)
-            hyp_contribs.sum(axis=-1, out=projected_hyp_contribs[:, :, idx_col_1hot])
+        # Sum on the one-hot axis, save directly to `projected_hyp_contribs`.
+        # The sum is to get the total hypothetical contribution (at that bp)
+        hyp_contribs.sum(axis=-1, out=projected_hyp_contribs[:, :, idx_col_1hot])
 
-        # Average on the num_shufs axis to arrive to the final hypothetical
-        # contribution scores (at each bp).
-        p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
-        to_return.append(torch.tensor(p_h_cbs_mean))
-    return to_return
+    # Average on the num_shufs axis to arrive to the final hypothetical
+    # contribution scores (at each bp).
+    p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
+    return [torch.tensor(p_h_cbs_mean)]
 
 
 # Silence an warning that is not relevant for this code
@@ -137,22 +152,31 @@ warnings.filterwarnings(
 )
 
 
-def calc_contrib_scores(dataloader, model_trained: cnn.CNNSTARR, device: torch.device):
+def calc_contrib_scores(
+    dataloader,
+    model_trained: cnn.CNNSTARR,
+    device: torch.device,
+    random_state: int = 913,
+):
     inputs_all = []
     shap_vals_all = []
 
     for batch, data in enumerate(dataloader):
         inputs, _targets = data
+        # the DeepExplainer will evaluate the inputs to get the pytorch gradients,
+        # put the inputs on the same device for faster inference when using GPU/MPS
         inputs = inputs.to(device)
         # targets = targets.to(device) # not needed for shap
 
         # calculate shap
         e = shap.DeepExplainer(
             model=model_trained,
-            data=partial(make_shuffled_1hot_seqs, device=device),
-            combine_mult_and_diffref=partial(
-                combine_multipliers_and_diff_from_ref, device=device
+            data=partial(
+                make_shuffled_1hot_seqs,
+                device=device,
+                rng=np.random.RandomState(random_state),
             ),
+            combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
         )
 
         # These will be consumed by TF-MoDISco

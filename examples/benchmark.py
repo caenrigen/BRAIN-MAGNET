@@ -65,10 +65,10 @@ from importlib import reload
 import utils as ut
 import cnn_starr as cnn
 import data_module as dm
-import utils_plots as utp
+import plot_utils as put
 
 reload(ut)
-reload(utp)
+reload(put)
 reload(cnn)
 reload(dm)
 

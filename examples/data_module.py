@@ -24,13 +24,15 @@ def bins_log2(s, n: int = 8):
     return bins(np.log2(s + 1), n=n)
 
 
-def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str):
-    x = np.stack(df[x_col].values)
+def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str, device: torch.device):
+    x = np.stack(df[x_col].values)  # type: ignore
     # [batch, seq_len, 4] -> [batch, 4, seq_len]
     # Convolutional layers expect tensors with shape [batch, channels, length]
-    tensor_x = torch.Tensor(x).permute(0, 2, 1)
+    tensor_x = torch.tensor(x, device=device, dtype=torch.float32).permute(0, 2, 1)
     # add one dimension in targets: [batch] -> [batch, 1]
-    tensor_y = torch.Tensor(df[y_col].values).unsqueeze(1)
+    tensor_y = torch.tensor(
+        df[y_col].values, device=device, dtype=torch.float32
+    ).unsqueeze(1)
     return TensorDataset(tensor_x, tensor_y)
 
 
@@ -67,15 +69,22 @@ def load_enrichment_data(
         # "SeqRevComp",
     ]
     df = pd.read_csv(fp, usecols=usecols)
+    df["SeqLen"] = df.Seq.str.len()
     df["SeqEnc"] = df.Seq.map(ut.one_hot_encode).map(ut.pad_one_hot)
     if drop_indices:
         df.drop(drop_indices, inplace=True)
     return df
 
 
-def make_dl(df: pd.DataFrame, y_col: str, batch_size: int = 256, shuffle: bool = False):
+def make_dl(
+    df: pd.DataFrame,
+    y_col: str,
+    device: torch.device,
+    batch_size: int = 256,
+    shuffle: bool = False,
+):
     return DataLoader(
-        make_tensor_dataset(df=df, x_col="SeqEnc", y_col=y_col),
+        make_tensor_dataset(df=df, x_col="SeqEnc", y_col=y_col, device=device),
         batch_size=batch_size,
         shuffle=shuffle,
     )
@@ -85,6 +94,7 @@ class DMSTARR(L.LightningDataModule):
     def __init__(
         self,
         df_enrichment: pd.DataFrame,
+        device: torch.device,
         y_col: str = "NSC_log2_enrichment",
         sample: Optional[int] = None,
         batch_size: int = 256,
@@ -113,6 +123,7 @@ class DMSTARR(L.LightningDataModule):
         self.frac_for_val = frac_for_val
         assert y_col in df_enrichment.columns
         self.bins_func = bins_func
+        self.device = device
 
     def prepare_data(self):
         if self.augment:
@@ -176,7 +187,9 @@ class DMSTARR(L.LightningDataModule):
                 )
 
     def setup(self, stage: Optional[str] = None):
-        func = partial(make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col)
+        func = partial(
+            make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col, device=self.device
+        )
         if stage == "fit":
             self.ds_train = func(df=self.df_train)
             self.ds_val = func(df=self.df_val)

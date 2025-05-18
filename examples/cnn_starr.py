@@ -138,7 +138,7 @@ class EpochCheckpoint(L.Callback):
 
 def load_model(
     fp: Path,
-    device,
+    device: torch.device,
     forward_mode: Literal["main", "revcomp", "both"] = "main",
 ):
     model = CNNSTARR(forward_mode=forward_mode, log_vars_prefix="")

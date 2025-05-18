@@ -18,11 +18,13 @@ from importlib import reload
 import utils as ut
 import cnn_starr as cnn
 import data_module as dm
+import plot_utils as put
 import motif_discovery as md
 
 _ = reload(ut)
 _ = reload(cnn)
 _ = reload(dm)
+_ = reload(put)
 _ = reload(md)
 
 # %%
@@ -38,8 +40,7 @@ import time
 import random
 from pathlib import Path
 import torch
-
-from deeplift.visualization import viz_sequence
+from torch.utils.data import DataLoader
 
 # %%
 random_state = 913
@@ -88,14 +89,14 @@ df_sample
 
 # %%
 dataset = dm.make_tensor_dataset(
-    df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment"
+    df=df_sample_1000, x_col="SeqEnc", y_col=f"{task}_log2_enrichment", device=device
 )
 dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 dataloader
 
 # %%
 # version, fold = "f9bd95fa", 0  # Conv2D
-version, fold = "cc0e922b", 0  # Conv1D
+version, fold = "cc0e922b", 4  # Conv1D
 fp = dbmt / f"starr_{task}" / version / "stats.pkl.bz2"
 df_models = pd.read_pickle(fp)
 fig, ax = plt.subplots(1, 1)
@@ -129,18 +130,6 @@ np.savez_compressed(dp, inputs=inputs, shap_vals=shap_vals)
 # %%
 inputs.shape, shap_vals.shape
 
-
-# %%
-def plot_weights(inputs, shap_vals, start: int, end: int):
-    segment = inputs[:, start:end]
-    hyp_imp_scores_segment = shap_vals[:, start:end]
-    # viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
-    # * The actual importance scores can be computed using an element-wise product of
-    # * the hypothetical importance scores and the actual importance scores
-    viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
-
-
-
 # %%
 dp = dbm / "cb_tmp"
 fps = [dp / "shap_vals_conv1d.npz"]
@@ -148,7 +137,7 @@ for fp in fps:
     loaded = np.load(fp)
     inputs, shap_vals = loaded["inputs"], loaded["shap_vals"]
     seq_idx = 0
-    plot_weights(inputs[seq_idx], shap_vals[seq_idx], 12, 1012)
+    put.plot_weights(inputs[seq_idx], shap_vals[seq_idx], 12, 1012)
 
 # %% [markdown]
 # ## Percentile contribution score
