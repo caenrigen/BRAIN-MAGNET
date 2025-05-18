@@ -29,22 +29,22 @@ class CNNSTARR(L.LightningModule):
         self.loss_fn = loss_fn
 
         self.model = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=(1, 15), padding="same"),
-            nn.BatchNorm2d(16),
+            nn.Conv1d(4, 16, kernel_size=15, padding="same"),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
-            nn.AvgPool2d((1, 2), (1, 2)),
+            nn.AvgPool1d(2),
             nn.Dropout(0.1),
-            nn.Conv2d(16, 16, kernel_size=(1, 13), padding="same"),
-            nn.BatchNorm2d(16),
+            nn.Conv1d(16, 16, kernel_size=13, padding="same"),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
-            nn.AvgPool2d((1, 2), (1, 2)),
+            nn.AvgPool1d(2),
             nn.Dropout(0.1),
-            nn.Conv2d(16, 16, kernel_size=(1, 11), padding="same"),
-            nn.BatchNorm2d(16),
+            nn.Conv1d(16, 16, kernel_size=11, padding="same"),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
-            nn.AvgPool2d((1, 2), (1, 2)),
+            nn.AvgPool1d(2),
             nn.Dropout(0.1),
-            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
@@ -145,8 +145,8 @@ def eval_model(model: CNNSTARR, dataloader: DataLoader, device):
             targets.append(targets_)
             preds.append(outputs)
 
-    targets = torch.cat(targets, dim=0).squeeze().cpu().numpy()
-    preds = torch.cat(preds, dim=0).squeeze().cpu().numpy()
+    targets = torch.cat(targets, dim=0).cpu().numpy()
+    preds = torch.cat(preds, dim=0).cpu().numpy()
     return targets, preds
 
 
