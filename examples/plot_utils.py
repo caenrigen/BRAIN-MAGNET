@@ -1,5 +1,7 @@
+from typing import Optional
 import numpy as np
 from scipy.interpolate import interpn
+from deeplift.visualization import viz_sequence
 
 
 def density_scatter(x, y, ax, sort=True, bins=100, cmap="magma", **kwargs):
