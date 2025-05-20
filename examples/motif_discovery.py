@@ -159,6 +159,7 @@ def calc_contrib_scores(
     model_trained: cnn.CNNSTARR,
     device: torch.device,
     random_state: int = 913,
+    num_shufs: int = 30,
 ):
     inputs_all = []
     shap_vals_all = []
@@ -176,6 +177,7 @@ def calc_contrib_scores(
             data=partial(
                 make_shuffled_1hot_seqs,
                 device=device,
+                num_shufs=num_shufs,
                 rng=np.random.RandomState(random_state),
             ),
             combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,

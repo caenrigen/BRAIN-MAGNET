@@ -46,7 +46,7 @@ def pad_one_hot(one_hot: np.ndarray, to: int = 1024):
 
 def unpad_one_hot(one_hot: np.ndarray):
     # Drop all rows that are all zeros (zero padding)
-    return one_hot[one_hot.sum(axis=1) != 0]
+    return one_hot[one_hot.sum(axis=1, dtype=np.bool)]
 
 
 def tensor_reverse_complement(x):
