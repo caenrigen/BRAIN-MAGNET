@@ -31,6 +31,8 @@ class CNNSTARR(L.LightningModule):
         self.prev_epoch: Optional[int] = None
         self.batches_losses: List[float] = []
 
+        # TODO add notes about layer types to avoid for simplicity of the downstream
+        #   SHAP analysis, i.e. motif discovery.
         self.model = nn.Sequential(
             nn.Conv1d(4, 16, kernel_size=15, padding="same"),
             nn.BatchNorm1d(16),
@@ -48,7 +50,7 @@ class CNNSTARR(L.LightningModule):
             nn.AvgPool1d(2),
             nn.Dropout(0.1),
             nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
+            nn.Flatten(),  # to be able to input into linear layer
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),

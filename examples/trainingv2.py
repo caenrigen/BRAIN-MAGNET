@@ -122,9 +122,9 @@ import data_module as dm
 # %%
 task = "ESC"
 # task = "NSC"
-df_enrichment = dm.load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq.csv.gz", y_col=f"{task}_log2_enrichment"
-)
+y_col = f"{task}_log2_enrichment"
+fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
+df_enrichment = dm.load_enrichment_data(fp, y_col=y_col)
 df_enrichment.head()
 
 # %%

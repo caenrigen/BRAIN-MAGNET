@@ -160,7 +160,15 @@ def calc_contrib_scores(
     device: torch.device,
     random_state: int = 913,
     num_shufs: int = 30,
+    avg_w_revcomp: bool = True,
 ):
+    """
+    num_shufs: number of shuffled sequences to use as reference for the hypothetical
+    contributions scores. Suggested values: ~30-50 if avg_w_revcomp=True, ~100 if
+    avg_w_revcomp=False.
+    avg_w_revcomp: whether to average the contribution scores obtained from inputting
+    both the "forward" and reverse complement strands.
+    """
     inputs_all = []
     shap_vals_all = []
 
@@ -182,9 +190,20 @@ def calc_contrib_scores(
             ),
             combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
         )
-
+        # `inputs` is a tensor of shape (batch_size, 4, num_bp)
         # These will be consumed by TF-MoDISco
         shap_vals = e.shap_values(inputs)
+        if avg_w_revcomp:
+            shap_vals_revcomp = e.shap_values(ut.tensor_reverse_complement(inputs))
+            shap_vals_rc_equiv = [
+                ut.one_hot_reverse_complement(shap_val.T).T
+                for shap_val in shap_vals_revcomp
+            ]
+            shap_vals = np.array(shap_vals)
+            # Average in-place
+            shap_vals += np.array(shap_vals_rc_equiv)
+            shap_vals /= 2
+
         inputs = inputs.detach()
 
         inputs_all.append(inputs)

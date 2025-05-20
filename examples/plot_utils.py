@@ -35,10 +35,14 @@ def plot_weights(
     shap_vals,
     start: Optional[int] = None,
     end: Optional[int] = None,
+    hypothetical: bool = False,
 ):
     segment = inputs[:, start:end]
     hyp_imp_scores_segment = shap_vals[:, start:end]
-    # viz_sequence.plot_weights(hyp_imp_scores_segment, subticks_frequency=20)
     # * The actual importance scores can be computed using an element-wise product of
     # * the hypothetical importance scores and the actual importance scores
-    viz_sequence.plot_weights(hyp_imp_scores_segment * segment, subticks_frequency=20)
+    if not hypothetical:
+        scores = hyp_imp_scores_segment * segment
+    else:
+        scores = hyp_imp_scores_segment
+    viz_sequence.plot_weights(scores, subticks_frequency=20)

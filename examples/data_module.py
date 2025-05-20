@@ -264,3 +264,14 @@ def pick_checkpoint(df, fold: int, tolerance: float = 0.10, ax=None):
     if ax:
         ax.vlines(epoch, min_, max_, color="red", linestyle="--")
     return int(epoch)
+
+
+def pick_best_checkpoint(dp_train: Path, version: str, task: str, fold: int):
+    fp = dp_train / f"starr_{task}" / version / "stats.pkl.bz2"
+    df_models = pd.read_pickle(fp)
+    epoch = pick_checkpoint(df_models, fold=fold)
+    dp_checkpoints = (
+        dp_train / f"starr_{task}" / version / f"fold_{fold}" / "epoch_checkpoints"
+    )
+    fp_model_checkpoint = list(dp_checkpoints.glob(f"{task}_ep{epoch:02d}*.pt"))[0]
+    return fp_model_checkpoint
