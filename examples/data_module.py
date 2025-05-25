@@ -1,16 +1,14 @@
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, TensorDataset, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 import seaborn as sns
-
-import utils as ut
 
 
 def bins(s, n: int = 8):
@@ -24,42 +22,8 @@ def bins_log2(s, n: int = 8):
     return bins(np.log2(s + 1), n=n)
 
 
-def make_tensor_dataset(df: pd.DataFrame, x_col: str, y_col: str, device: torch.device):
-    x = np.stack(df[x_col].values)  # type: ignore
-    # [batch, seq_len, 4] -> [batch, 4, seq_len]
-    # Convolutional layers expect tensors with shape [batch, channels, length]
-    tensor_x = torch.tensor(x, device=device, dtype=torch.float32).permute(0, 2, 1)
-    # add one dimension in targets: [batch] -> [batch, 1]
-    tensor_y = torch.tensor(
-        df[y_col].values, device=device, dtype=torch.float32
-    ).unsqueeze(1)
-    return TensorDataset(tensor_x, tensor_y)
-
-
-# These seem to be experimental errors, these 10 sequences are predicted by all models
-# to have high activity.
-# m_outliers = (targets < 0.2) & (preds > 2)
-OUTLIER_INDICES = [
-    7885,
-    19948,
-    20312,
-    33019,
-    46116,
-    53222,
-    75207,
-    111863,
-    120174,
-    128136,
-]
-
-
 class MemMapDataset(Dataset):
-    def __init__(
-        self,
-        fp_npy_1hot_seqs: Path,
-        targets: np.ndarray,
-        indices: Optional[np.ndarray] = None,
-    ):
+    def __init__(self, fp_npy_1hot_seqs: str, targets: np.ndarray):
         self.seqs_1hot = np.load(fp_npy_1hot_seqs, mmap_mode="r")
         self.targets = targets
 
@@ -71,25 +35,13 @@ class MemMapDataset(Dataset):
         if self.seqs_1hot.shape[1] != 4:
             raise ValueError(f"{self.seqs_1hot.shape[1] = } must be 4")
 
-        if indices is None:
-            if len(self.seqs_1hot) != len(self.targets):
-                raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
-            self.indices = np.arange(len(targets), dtype=np.int64)
-        else:
-            if len(indices) > len(targets) or len(indices) > len(self.seqs_1hot):
-                raise ValueError(f"{len(indices) = } > {len(targets) = }")
-            if max(indices) >= len(targets):
-                raise ValueError(f"{max(indices) = } >= {len(targets) = }")
-            self.indices = indices
-
     def __len__(self):
-        return len(self.indices)
+        return len(self.targets)
 
     def __getitem__(
         self, idx: Union[int, slice, np.ndarray, List[int]]
     ) -> Tuple[np.ndarray, np.ndarray]:
-        real_idx = self.indices[idx]
-        return self.seqs_1hot[real_idx], self.targets[real_idx]
+        return self.seqs_1hot[idx], self.targets[idx]
 
 
 def collate(batch: List[Tuple[np.ndarray, np.ndarray]], device: torch.device):
@@ -119,24 +71,10 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]], device: torch.device):
     return seqs_tensor, targets_tensor.unsqueeze(1)
 
 
-def make_dl(
-    df: pd.DataFrame,
-    y_col: str,
-    device: torch.device,
-    batch_size: int = 256,
-    shuffle: bool = False,
-):
-    return DataLoader(
-        make_tensor_dataset(df=df, x_col="SeqEnc", y_col=y_col, device=device),
-        batch_size=batch_size,
-        shuffle=shuffle,
-    )
-
-
 class DataModule(L.LightningDataModule):
     def __init__(
         self,
-        fp_npy_1hot_seqs: Path,
+        fp_npy_1hot_seqs: str,
         targets: np.ndarray,
         device: torch.device,
         batch_size: int = 256,
@@ -151,25 +89,29 @@ class DataModule(L.LightningDataModule):
         super().__init__()
         self.fp_npy_1hot_seqs = fp_npy_1hot_seqs
         self.targets = targets
-        self.indices_train = self.indices_test = self.indices_val = None
-        self.ds_train = self.ds_val = self.ds_test = None
+
+        self.indices_train: Optional[np.ndarray] = None
+        self.indices_test: Optional[np.ndarray] = None
+        self.indices_val: Optional[np.ndarray] = None
+
         self.batch_size = batch_size
         self.random_state = random_state
+        self.device = device
+        self.num_workers = num_workers
+
+        if n_folds is not None and fold >= n_folds:
+            raise ValueError(f"{fold = } must be less than {n_folds = }")
         self.n_folds = n_folds
         self.fold = fold
         self.frac_for_test = frac_for_test
         self.frac_for_val = frac_for_val
         self.bins_func = bins_func
-        self.device = device
-        self.num_workers = num_workers
-        if n_folds is not None and fold >= n_folds:
-            raise ValueError(f"{fold = } must be less than {n_folds = }")
 
-        self.make_dataset = partial(
-            MemMapDataset,
+        self.dataset = MemMapDataset(
             fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
             targets=self.targets,
         )
+
         self.make_dataloader = partial(
             DataLoader,
             batch_size=self.batch_size,
@@ -246,28 +188,19 @@ class DataModule(L.LightningDataModule):
         assert s == set_all
 
     def setup(self, stage: Optional[str] = None):
-        if stage == "fit":
-            assert self.indices_train is not None
-            assert self.indices_val is not None
-            self.ds_train = self.make_dataset(indices=self.indices_train)
-            self.ds_val = self.make_dataset(indices=self.indices_val)
-        elif stage == "test":
-            assert self.indices_test is not None
-            self.ds_test = self.make_dataset(indices=self.indices_test)
-        else:
-            raise NotImplementedError(f"{stage = }")
+        pass
 
     def train_dataloader(self):
-        assert self.ds_train is not None
-        return self.make_dataloader(self.ds_train)
+        assert self.indices_train is not None
+        return self.make_dataloader(Subset(self.dataset, self.indices_train))  # type: ignore
 
     def val_dataloader(self):
-        assert self.ds_val is not None
-        return self.make_dataloader(self.ds_val)
+        assert self.indices_val is not None
+        return self.make_dataloader(Subset(self.dataset, self.indices_val))  # type: ignore
 
     def test_dataloader(self):
-        assert self.ds_test is not None
-        return self.make_dataloader(self.ds_test)
+        assert self.indices_test is not None
+        return self.make_dataloader(Subset(self.dataset, self.indices_test))  # type: ignore
 
 
 def list_fold_checkpoints(dp_train: Path, version: str, task: str):
