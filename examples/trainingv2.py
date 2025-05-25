@@ -134,15 +134,6 @@ def train(fold: int = 0):
     )
     model.to(device)
 
-    # On macOS with MPS (Apple Silicon) using multiprocessing did not give any speed up.
-    # For CUDA it might very well be worth it.
-    num_workers = 0
-
-    # Ref: https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
-    # "fork" won't consume a lot of RAM, but might not work (well) on all OSes/versions.
-    # Set it first to None if you run into any issues.
-    multiprocessing_context = "fork" if num_workers else None
-
     data_loader = dm.DataModule(
         fp_npy_1hot_seqs=str(fp_npy_1hot_seqs),
         targets=targets,
@@ -152,9 +143,6 @@ def train(fold: int = 0):
         frac_for_val=frac_for_val,
         # DataLoader kwargs:
         batch_size=512,
-        num_workers=num_workers,
-        persistent_workers=bool(num_workers),
-        multiprocessing_context=multiprocessing_context,
         # These might give some speed up if cuda is available
         # pin_memory=True,
         # pin_memory_device="cuda",

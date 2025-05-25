@@ -1,6 +1,6 @@
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
@@ -82,6 +82,17 @@ class DataModule(L.LightningDataModule):
         frac_for_test: float = 0.10,
         frac_for_val: float = 0.10,
         bins_func: Callable = bins_log2,
+        # DataLoader kwargs:
+        batch_size: int = 128,
+        # On macOS with MPS (Apple Silicon) using multiprocessing did not give any speed up.
+        # With CUDA maybe it does, thought out MemMapDataset is already efficient.
+        num_workers: int = 0,
+        # Only relevant if num_workers > 0
+        # Ref: https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
+        # multiprocessing_context="fork" won't consume a lot of RAM,
+        # but might not work (well) on all OSes/versions.
+        multiprocessing_context=None,
+        persistent_workers: Optional[bool] = None,
         **dataloader_kwargs,
     ):
         super().__init__()
@@ -108,10 +119,17 @@ class DataModule(L.LightningDataModule):
             targets=self.targets,
         )
 
+        if persistent_workers is None:
+            persistent_workers = num_workers > 0
+
         self.DataLoader = partial(
             DataLoader,
             shuffle=False,
             collate_fn=collate,
+            num_workers=num_workers,
+            multiprocessing_context=multiprocessing_context,
+            persistent_workers=persistent_workers,
+            batch_size=batch_size,
             **self.dataloader_kwargs,
         )
 
