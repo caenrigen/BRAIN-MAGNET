@@ -14,14 +14,13 @@
 # ---
 
 # %%
-import pandas as pd
-from tqdm.auto import tqdm
 from pathlib import Path
 import gc
 from random import randbytes
+from tqdm.auto import tqdm
 
-import lightning as L
 import torch
+import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
 
 # %%
@@ -90,22 +89,27 @@ import data_module as dm
 # - cc0e922b: no test, 5% val, augment=None, all 16, 15/13/11, Conv1D, fixed loss logging
 
 # %%
-fp_npy_1hot_seqs = dbmrd / "seqs_shape(5000,4,1000).npy"
-assert fp_npy_1hot_seqs.exists()
-
-# %%
 task = "ESC"
 y_col = f"{task}_log2_enrichment"
 fp = dbmrd / "Enhancer_activity_with_ACTG_sequences.csv.gz"
-targets = pd.read_csv(fp, usecols=[y_col])[y_col].to_numpy()[:5000]
+targets = pd.read_csv(fp, usecols=[y_col])[y_col].to_numpy()
 targets.shape
+
+# %%
+# fp_npy_1hot_seqs = dbmrd / "seqs_shape(5000,4,1000).npy"
+# targets = targets[:5000]
+
+fp_npy_1hot_seqs = dbmrd / "seqs_shape(148114,4,1000).npy"
+assert fp_npy_1hot_seqs.exists()
 
 # %%
 gc.collect()
 torch.mps.empty_cache()
 
 # %% [raw] vscode={"languageId": "raw"}
-# Old data loader: 03:46, 4.5-5GB
+# Old data loader: ~4 min, 4.5-5GB
+# New data loader: ~4 min, 1.8GB
+# 512 batch size: ~2 min
 
 # %%
 version = randbytes(4).hex()
@@ -124,21 +128,36 @@ frac_for_val = 0.05
 
 def train(fold: int = 0):
     model = cnn.CNNSTARR(
-        lr=0.01,
+        lr=0.01,  # learning rate
         weight_decay=1e-6,
         log_vars_prefix=task,
     )
     model.to(device)
 
+    # On macOS with MPS (Apple Silicon) using multiprocessing did not give any speed up.
+    # For CUDA it might very well be worth it.
+    num_workers = 0
+
+    # Ref: https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
+    # "fork" won't consume a lot of RAM, but might not work (well) on all OSes/versions.
+    # Set it first to None if you run into any issues.
+    multiprocessing_context = "fork" if num_workers else None
+
     data_loader = dm.DataModule(
-        fp_npy_1hot_seqs=fp_npy_1hot_seqs,
+        fp_npy_1hot_seqs=str(fp_npy_1hot_seqs),
         targets=targets,
         n_folds=n_folds,
         fold=fold,
         frac_for_test=frac_for_test,
         frac_for_val=frac_for_val,
-        device=device,
-        num_workers=0,
+        # DataLoader kwargs:
+        batch_size=512,
+        num_workers=num_workers,
+        persistent_workers=bool(num_workers),
+        multiprocessing_context=multiprocessing_context,
+        # These might give some speed up if cuda is available
+        # pin_memory=True,
+        # pin_memory_device="cuda",
     )
 
     logger = TensorBoardLogger(
@@ -150,7 +169,6 @@ def train(fold: int = 0):
     trainer = L.Trainer(
         max_epochs=max_epochs,
         logger=logger,
-        # callbacks=[early_stop],
         callbacks=[cnn.EpochCheckpoint(task=task)],
     )
 

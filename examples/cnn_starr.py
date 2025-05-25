@@ -89,8 +89,8 @@ class CNNSTARR(L.LightningModule):
             self.batches_losses.append(loss)
             # Average across the epoch batches
             # ! This not equivalent to the loss that is obtained by evaluating the
-            # ! end-of-epoch model on the entire training set. This is because
-            # ! its weights are updated after each batch.
+            # ! end-of-epoch model on the entire training set. This is because the
+            # ! weights are updated after each batch.
             loss_log = sum(self.batches_losses) / len(self.batches_losses)
         else:
             loss_log = loss

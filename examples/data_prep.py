@@ -21,17 +21,12 @@
 # %aimport utils, data_module
 
 import utils as ut
-import data_module as dm
 
 # %%
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
 from pathlib import Path
 import torch
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, TensorDataset
-import lightning as L
 from functools import partial
 
 # %%
@@ -52,8 +47,9 @@ fp = dbmrd / "Enhancer_activity_with_ACTG_sequences.csv.gz"
 df_enrichment = pd.read_csv(fp)
 
 # %%
-n_samples = 5000
-df = df_enrichment[:n_samples].copy()
+# n_samples = 5000
+# df = df_enrichment[:n_samples].copy()
+df = df_enrichment
 
 # %%
 # Transpose to match how pytorch organizes data: (batch_size, channels=4, num_bp)
@@ -71,6 +67,9 @@ fp_size, fp
 arr_memmap = np.load(fp, mmap_mode="r")
 arr_memmap.shape
 
-# %%
-from torch.utils.data import Subset
+# %% [raw] vscode={"languageId": "raw"}
+# from torch.utils.data import DataLoader, Subset
+# Subset?
 
+# %% [raw]
+# DataLoader?

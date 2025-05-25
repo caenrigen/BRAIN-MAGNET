@@ -44,7 +44,7 @@ class MemMapDataset(Dataset):
         return self.seqs_1hot[idx], self.targets[idx]
 
 
-def collate(batch: List[Tuple[np.ndarray, np.ndarray]], device: torch.device):
+def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
     """
     Collate a list of tuples (numpy_array, target_scalar) into a single tuple
     (torch.Tensor, torch.Tensor).
@@ -63,9 +63,9 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]], device: torch.device):
     assert seqs_batch.shape == expected_shape, (seqs_batch.shape, expected_shape)
 
     # Convert to torch.Tensor (float32)
-    seqs_tensor = torch.from_numpy(seqs_batch).float().to(device)
+    seqs_tensor = torch.from_numpy(seqs_batch).float()
     # Targets: small list (compared to seqs_batch), so direct tensor conversion
-    targets_tensor = torch.tensor(targets, dtype=torch.float32, device=device)
+    targets_tensor = torch.tensor(targets, dtype=torch.float32)
 
     # add one dimension in targets: [batch] -> [batch, 1]
     return seqs_tensor, targets_tensor.unsqueeze(1)
@@ -76,15 +76,13 @@ class DataModule(L.LightningDataModule):
         self,
         fp_npy_1hot_seqs: str,
         targets: np.ndarray,
-        device: torch.device,
-        batch_size: int = 256,
         random_state: int = 913,
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to n_folds-1)
         frac_for_test: float = 0.10,
         frac_for_val: float = 0.10,
         bins_func: Callable = bins_log2,
-        num_workers: int = 4,
+        **dataloader_kwargs,
     ):
         super().__init__()
         self.fp_npy_1hot_seqs = fp_npy_1hot_seqs
@@ -94,10 +92,8 @@ class DataModule(L.LightningDataModule):
         self.indices_test: Optional[np.ndarray] = None
         self.indices_val: Optional[np.ndarray] = None
 
-        self.batch_size = batch_size
         self.random_state = random_state
-        self.device = device
-        self.num_workers = num_workers
+        self.dataloader_kwargs = dataloader_kwargs
 
         if n_folds is not None and fold >= n_folds:
             raise ValueError(f"{fold = } must be less than {n_folds = }")
@@ -112,13 +108,11 @@ class DataModule(L.LightningDataModule):
             targets=self.targets,
         )
 
-        self.make_dataloader = partial(
+        self.DataLoader = partial(
             DataLoader,
-            batch_size=self.batch_size,
             shuffle=False,
-            collate_fn=partial(collate, device=self.device),
-            num_workers=self.num_workers,
-            persistent_workers=bool(self.num_workers),
+            collate_fn=collate,
+            **self.dataloader_kwargs,
         )
 
     def prepare_data(self):
@@ -192,15 +186,15 @@ class DataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         assert self.indices_train is not None
-        return self.make_dataloader(Subset(self.dataset, self.indices_train))  # type: ignore
+        return self.DataLoader(self.dataset, sampler=self.indices_train)
 
     def val_dataloader(self):
         assert self.indices_val is not None
-        return self.make_dataloader(Subset(self.dataset, self.indices_val))  # type: ignore
+        return self.DataLoader(self.dataset, sampler=self.indices_val)
 
     def test_dataloader(self):
         assert self.indices_test is not None
-        return self.make_dataloader(Subset(self.dataset, self.indices_test))  # type: ignore
+        return self.DataLoader(self.dataset, sampler=self.indices_test)
 
 
 def list_fold_checkpoints(dp_train: Path, version: str, task: str):
