@@ -1,10 +1,10 @@
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -53,28 +53,70 @@ OUTLIER_INDICES = [
 ]
 
 
-def load_enrichment_data(
-    fp: Path,
-    y_col: str = "NSC_log2_enrichment",
-    drop_indices: Optional[List[int]] = None,
-    pad_to: int = 1000,
-):
-    usecols = [
-        # "Chr",
-        # "Start",
-        # "End",
-        # "NSC_log2_enrichment",
-        # "ESC_log2_enrichment",
-        y_col,
-        "Seq",
-        # "SeqRevComp",
-    ]
-    df = pd.read_csv(fp, usecols=usecols)
-    df["SeqLen"] = df.Seq.str.len()
-    df["SeqEnc"] = df.Seq.map(ut.one_hot_encode).map(partial(ut.pad_one_hot, to=pad_to))
-    if drop_indices:
-        df.drop(drop_indices, inplace=True)
-    return df
+class MemMapDataset(Dataset):
+    def __init__(
+        self,
+        fp_npy_1hot_seqs: Path,
+        targets: np.ndarray,
+        indices: Optional[np.ndarray] = None,
+    ):
+        self.seqs_1hot = np.load(fp_npy_1hot_seqs, mmap_mode="r")
+        self.targets = targets
+
+        if len(self.seqs_1hot) != len(self.targets):
+            raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
+
+        if len(self.seqs_1hot.shape) != 3:
+            raise ValueError(f"{self.seqs_1hot.shape = } must be 3")
+        if self.seqs_1hot.shape[1] != 4:
+            raise ValueError(f"{self.seqs_1hot.shape[1] = } must be 4")
+
+        if indices is None:
+            if len(self.seqs_1hot) != len(self.targets):
+                raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
+            self.indices = np.arange(len(targets), dtype=np.int64)
+        else:
+            if len(indices) > len(targets) or len(indices) > len(self.seqs_1hot):
+                raise ValueError(f"{len(indices) = } > {len(targets) = }")
+            if max(indices) >= len(targets):
+                raise ValueError(f"{max(indices) = } >= {len(targets) = }")
+            self.indices = indices
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(
+        self, idx: Union[int, slice, np.ndarray, List[int]]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        real_idx = self.indices[idx]
+        return self.seqs_1hot[real_idx], self.targets[real_idx]
+
+
+def collate(batch: List[Tuple[np.ndarray, np.ndarray]], device: torch.device):
+    """
+    Collate a list of tuples (numpy_array, target_scalar) into a single tuple
+    (torch.Tensor, torch.Tensor).
+
+    The input has the shape (batch_size, 4, L) and the targets have
+    the shape (batch_size,).
+
+    The input comes from indexing/slicing the MemMapDataset (i.e. the return
+    of MemMapDataset.__getitem__).
+    """
+    seqs, targets = zip(*batch)
+    # Stack all NumPy arrays along new batch dimension
+    seqs_batch = np.stack(seqs)
+
+    expected_shape = (len(batch), 4, len(batch[0][0][0]))
+    assert seqs_batch.shape == expected_shape, (seqs_batch.shape, expected_shape)
+
+    # Convert to torch.Tensor (float32)
+    seqs_tensor = torch.from_numpy(seqs_batch).float().to(device)
+    # Targets: small list (compared to seqs_batch), so direct tensor conversion
+    targets_tensor = torch.tensor(targets, dtype=torch.float32, device=device)
+
+    # add one dimension in targets: [batch] -> [batch, 1]
+    return seqs_tensor, targets_tensor.unsqueeze(1)
 
 
 def make_dl(
@@ -91,122 +133,141 @@ def make_dl(
     )
 
 
-class DMSTARR(L.LightningDataModule):
+class DataModule(L.LightningDataModule):
     def __init__(
         self,
-        df_enrichment: pd.DataFrame,
+        fp_npy_1hot_seqs: Path,
+        targets: np.ndarray,
         device: torch.device,
-        y_col: str = "NSC_log2_enrichment",
-        sample: Optional[int] = None,
         batch_size: int = 256,
         random_state: int = 913,
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
-        fold_idx: int = 0,  # Current fold index (0 to n_folds-1)
-        augment: Optional[Union[Callable, int]] = None,
-        frac_for_test: float = 0.1,
-        frac_for_val: float = 0.1,
+        fold: int = 0,  # Current fold index (0 to n_folds-1)
+        frac_for_test: float = 0.10,
+        frac_for_val: float = 0.10,
         bins_func: Callable = bins_log2,
+        num_workers: int = 4,
     ):
         super().__init__()
-        self.df_enrichment = df_enrichment
-        self.y_col = y_col
-        self.sample = sample  # for quick code tests with small data sample
-        self.df = self.df_train = self.df_val = self.df_test = None
+        self.fp_npy_1hot_seqs = fp_npy_1hot_seqs
+        self.targets = targets
+        self.indices_train = self.indices_test = self.indices_val = None
         self.ds_train = self.ds_val = self.ds_test = None
         self.batch_size = batch_size
         self.random_state = random_state
-        if n_folds is not None and fold_idx >= n_folds:
-            raise ValueError(f"{fold_idx = } must be less than {n_folds = }")
         self.n_folds = n_folds
-        self.fold_idx = fold_idx
-        self.augment = augment
+        self.fold = fold
         self.frac_for_test = frac_for_test
         self.frac_for_val = frac_for_val
-        assert y_col in df_enrichment.columns
         self.bins_func = bins_func
         self.device = device
+        self.num_workers = num_workers
+        if n_folds is not None and fold >= n_folds:
+            raise ValueError(f"{fold = } must be less than {n_folds = }")
+
+        self.make_dataset = partial(
+            MemMapDataset,
+            fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
+            targets=self.targets,
+        )
+        self.make_dataloader = partial(
+            DataLoader,
+            batch_size=self.batch_size,
+            shuffle=False,
+            collate_fn=partial(collate, device=self.device),
+            num_workers=self.num_workers,
+            persistent_workers=bool(self.num_workers),
+        )
 
     def prepare_data(self):
-        if self.augment:
-            if isinstance(self.augment, int):
-                self.df_enrichment["augment"] = self.augment
-            else:
-                self.df_enrichment["augment"] = self.augment(
-                    self.df_enrichment[self.y_col]
-                )
-
-        if self.sample:
-            _, self.df = train_test_split(
-                self.df_enrichment,
-                test_size=self.sample,
-                random_state=self.random_state,
-                stratify=self.bins_func(self.df_enrichment[self.y_col]),
-            )
-        else:
-            self.df = self.df_enrichment
-
         if self.frac_for_test:
-            self.df, self.df_test = train_test_split(
-                self.df,
+            # Put aside a fraction of the data for a final testing
+            indices_train_val, self.indices_test = train_test_split(
+                np.arange(len(self.targets)),
                 test_size=self.frac_for_test,
                 random_state=self.random_state,
-                stratify=self.bins_func(self.df[self.y_col]),
+                stratify=self.bins_func(self.targets),
+                shuffle=True,  # stratify requires shuffle=True
             )
-        if self.augment and self.df_test:
-            self.df_test = ut.augment_data(self.df_test, random_state=self.random_state)
+        else:
+            indices_train_val = np.arange(len(self.targets))
+
+        # Make a train/val split, simple or k-folds cross-validated
 
         if self.n_folds is not None:
             kf = StratifiedKFold(
-                n_splits=self.n_folds, shuffle=True, random_state=self.random_state
+                n_splits=self.n_folds,
+                shuffle=True,
+                random_state=self.random_state,
             )
-            for i, (train_idxs, val_idxs) in enumerate(
-                kf.split(self.df, self.bins_func(self.df[self.y_col]))
-            ):
-                if i == self.fold_idx:
-                    assert len(val_idxs) < len(train_idxs)
-                    self.df_val = self.df.iloc[val_idxs]
-                    self.df_train = self.df.iloc[train_idxs]
+            targets_train_val = self.targets[indices_train_val]
+            # X is dummy, it is not relevant for stratified splitting
+            split = kf.split(X=targets_train_val, y=self.bins_func(targets_train_val))
+            for i, (train_indices, val_indices) in enumerate(split):
+                if i == self.fold:
+                    assert len(val_indices) < len(train_indices)
+                    # Get the real indices
+                    self.indices_train = indices_train_val[train_indices]
+                    self.indices_val = indices_train_val[val_indices]
                     break
         else:
-            self.df_train, self.df_val = train_test_split(
-                self.df,
+            self.indices_train, self.indices_val = train_test_split(
+                indices_train_val,
                 test_size=self.frac_for_val,
                 random_state=self.random_state,
-                stratify=self.bins_func(self.df[self.y_col]),
+                stratify=self.bins_func(self.targets[indices_train_val]),
+                shuffle=True,  # stratify requires shuffle=True
             )
 
-        if self.augment:
-            self.df_train = ut.augment_data(
-                self.df_train, random_state=self.random_state
-            )
-            if callable(self.augment):
-                # Augment the validation set as well, otherwise the validation loss is
-                # not comparable to the training loss when the augment changes the
-                # targets distribution.
-                self.df_val = ut.augment_data(
-                    self.df_val, random_state=self.random_state
-                )
+        self.validate_data_split()
+
+    def validate_data_split(self):
+        assert self.indices_train is not None
+        assert self.indices_val is not None
+
+        # The train and val sets must be disjoint
+        set_all = set(np.arange(len(self.targets)))
+        set_train = set(self.indices_train)
+        set_val = set(self.indices_val)
+        assert set_train & set_val == set(), f"{set_train = } != {set_val = }"
+
+        t = len(self.indices_train) + len(self.indices_val)
+        s = set_train | set_val
+
+        if self.frac_for_test:
+            assert self.indices_test is not None
+            set_test = set(self.indices_test)
+            assert set_test & set_train == set()
+            assert set_test & set_val == set()
+            t += len(self.indices_test)
+            s |= set_test
+        # The data split must must cover the whole dataset
+        assert t == len(self.targets), f"{t = } != {len(self.targets) = }"
+        assert s == set_all
 
     def setup(self, stage: Optional[str] = None):
-        func = partial(
-            make_tensor_dataset, x_col="SeqEnc", y_col=self.y_col, device=self.device
-        )
         if stage == "fit":
-            self.ds_train = func(df=self.df_train)
-            self.ds_val = func(df=self.df_val)
+            assert self.indices_train is not None
+            assert self.indices_val is not None
+            self.ds_train = self.make_dataset(indices=self.indices_train)
+            self.ds_val = self.make_dataset(indices=self.indices_val)
         elif stage == "test":
-            self.ds_test = func(df=self.df_test)
+            assert self.indices_test is not None
+            self.ds_test = self.make_dataset(indices=self.indices_test)
         else:
             raise NotImplementedError(f"{stage = }")
 
     def train_dataloader(self):
-        return DataLoader(self.ds_train, batch_size=self.batch_size, shuffle=True)
+        assert self.ds_train is not None
+        return self.make_dataloader(self.ds_train)
 
     def val_dataloader(self):
-        return DataLoader(self.ds_val, batch_size=self.batch_size, shuffle=False)
+        assert self.ds_val is not None
+        return self.make_dataloader(self.ds_val)
 
     def test_dataloader(self):
-        return DataLoader(self.ds_test, batch_size=self.batch_size, shuffle=False)
+        assert self.ds_test is not None
+        return self.make_dataloader(self.ds_test)
 
 
 def list_fold_checkpoints(dp_train: Path, version: str, task: str):

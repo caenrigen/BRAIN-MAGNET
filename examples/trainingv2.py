@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -14,59 +14,34 @@
 # ---
 
 # %%
-# Test tqdm progress bar
-import time
-from tqdm.auto import tqdm
-
-for _ in tqdm(range(10)):
-    time.sleep(0.1)
-
-# %%
-import os
-import numpy as np
-import seaborn as sns
-import scipy as sp
-import matplotlib.pyplot as plt
-from scipy import stats
 import pandas as pd
-import math
-import time
-import random
 from tqdm.auto import tqdm
 from pathlib import Path
-from typing import Optional
-from functools import partial
 import gc
+from random import randbytes
 
 import lightning as L
 import torch
-from torch import nn
-import gc
-from torch.utils.data import DataLoader, TensorDataset
 from lightning.pytorch.loggers import TensorBoardLogger
-from random import randbytes
 
 # %%
 random_state = 913
-# random.seed(random_state)
-
-dbmc = Path("/Users/victor/Documents/ProjectsDev/genomics/BRAIN-MAGNET")
 dbm = Path("/Volumes/Famafia/brain-magnet")
-
-# dbmc = Path("/Users/victor/sshpyk_code")
-# dbm = Path("/Users/victor/sshpyk_data/")
-
-dbmce = str(dbmc / "examples")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
-os.chdir(dbmce)
 
 # %%
 print(torch.cuda.is_available(), torch.backends.mps.is_available())
-# device = torch.device("cuda")
-# device = torch.device("cpu")
-device = torch.device("mps")
+device = torch.device("mps")  # mps/cuda/cpu
 device
+
+# %%
+# %load_ext autoreload
+# %autoreload explicit
+# %aimport utils, cnn_starr, data_module
+
+import cnn_starr as cnn
+import data_module as dm
 
 # %% [raw] vscode={"languageId": "raw"}
 # # Logs
@@ -115,42 +90,39 @@ device
 # - cc0e922b: no test, 5% val, augment=None, all 16, 15/13/11, Conv1D, fixed loss logging
 
 # %%
-import utils as ut
-import cnn_starr as cnn
-import data_module as dm
+fp_npy_1hot_seqs = dbmrd / "seqs_shape(5000,4,1000).npy"
+assert fp_npy_1hot_seqs.exists()
 
 # %%
 task = "ESC"
-# task = "NSC"
 y_col = f"{task}_log2_enrichment"
-fp = dbmrd / "Enhancer_activity_w_seq.csv.gz"
-df_enrichment = dm.load_enrichment_data(fp, y_col=y_col)
-df_enrichment.head()
+fp = dbmrd / "Enhancer_activity_with_ACTG_sequences.csv.gz"
+targets = pd.read_csv(fp, usecols=[y_col])[y_col].to_numpy()[:5000]
+targets.shape
 
 # %%
 gc.collect()
 torch.mps.empty_cache()
+
+# %% [raw] vscode={"languageId": "raw"}
+# Old data loader: 03:46, 4.5-5GB
 
 # %%
 version = randbytes(4).hex()
 print(f"{version = }")
 sample = None
 
-n_folds = 5
-folds = range(n_folds)
+n_folds = None
+folds = range(n_folds) if n_folds else []
 # folds = [0]
 
-max_epochs = 10 * 5
+max_epochs = 10
 
 frac_for_test = 0
 frac_for_val = 0.05
-# augment = 4
-augment = None
-
-y_col = f"{task}_log2_enrichment"
 
 
-def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
+def train(fold: int = 0):
     model = cnn.CNNSTARR(
         lr=0.01,
         weight_decay=1e-6,
@@ -158,23 +130,22 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
     )
     model.to(device)
 
-    data_loader = dm.DMSTARR(
-        df_enrichment=df_enrichment,
-        sample=sample,
-        y_col=y_col,
+    data_loader = dm.DataModule(
+        fp_npy_1hot_seqs=fp_npy_1hot_seqs,
+        targets=targets,
         n_folds=n_folds,
-        fold_idx=fold_idx,
-        augment=augment,
+        fold=fold,
         frac_for_test=frac_for_test,
         frac_for_val=frac_for_val,
         device=device,
+        num_workers=0,
     )
 
     logger = TensorBoardLogger(
         dbmt,
         name=f"starr_{task}",
         version=version,
-        sub_dir=f"fold_{fold_idx}",
+        sub_dir=f"fold_{fold}",
     )
     trainer = L.Trainer(
         max_epochs=max_epochs,
@@ -184,7 +155,7 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
     )
 
     try:
-        trainer.fit(model, data_loader)  # run training
+        trainer.fit(model, datamodule=data_loader)  # run training
     except (KeyboardInterrupt, NameError):
         print("Training interrupted by user")
         return False
@@ -199,16 +170,14 @@ def train(df_enrichment, task, max_epochs, n_folds, fold_idx=0):
 
 
 if n_folds:
-    for fold_idx in tqdm(folds, desc="Folds"):
-        # if fold_idx < 4:
+    for fold in tqdm(folds, desc="Folds"):
+        # if fold < 4:
         #     continue
-        res = train(df_enrichment, task, max_epochs, n_folds, fold_idx=fold_idx)
+        res = train(fold=fold)
         if not res:
             break
 else:
-    res = train(df_enrichment, task, max_epochs, n_folds)
-
-# %%
-version
+    fold = 0
+    res = train(fold=fold)
 
 # %%
