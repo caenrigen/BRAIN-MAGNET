@@ -18,7 +18,7 @@
 # %autoreload explicit
 
 # %%
-# %aimport utils, data_module
+# %aimport utils
 
 import utils as ut
 
@@ -26,7 +26,6 @@ import utils as ut
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import torch
 from functools import partial
 
 # %%
@@ -36,15 +35,9 @@ dbmt = dbm / "train"
 assert dbm.is_dir()
 
 # %%
-print(torch.cuda.is_available(), torch.backends.mps.is_available())
-# device = torch.device("cuda")
-# device = torch.device("cpu")
-device = torch.device("mps")  # might have priblems for macOS <14.0
-device
-
-# %%
 fp = dbmrd / "Enhancer_activity_with_ACTG_sequences.csv.gz"
-df_enrichment = pd.read_csv(fp)
+df_enrichment = pd.read_csv(fp, usecols=["Seq"])
+df_enrichment.head()
 
 # %%
 # n_samples = 5000
@@ -54,22 +47,26 @@ df = df_enrichment
 # %%
 # Transpose to match how pytorch organizes data: (batch_size, channels=4, num_bp)
 func = partial(ut.one_hot_encode, pad_to=1000, transpose=True)
-arr = np.stack(df.Seq.map(func).values, axis=0)  # type: ignore
+seqs_1hot = df.Seq.map(func)  # type: ignore
+arr = np.stack(seqs_1hot.values, axis=0)
 arr.shape
 
 # %%
-fp = dbmrd / f"seqs_shape{arr.shape}.npy".replace(" ", "")
+fp = dbmrd / f"seqs{arr.shape}.npy".replace(" ", "")
 np.save(fp, arr)
-fp_size = round(fp.stat().st_size / 2**20)  # size in MB
-fp_size, fp
+round(fp.stat().st_size / 2**20), fp  # size in MB
 
 # %%
+func = partial(ut.one_hot_reverse_complement, is_transposed=True)
+arr_rev = np.stack(seqs_1hot.map(func).values, axis=0)
+arr_rev.shape
+
+# %%
+fp = dbmrd / f"seqs_rev_comp{arr.shape}.npy".replace(" ", "")
+np.save(fp, arr)
+round(fp.stat().st_size / 2**20), fp
+
+# %%
+# Test loading
 arr_memmap = np.load(fp, mmap_mode="r")
 arr_memmap.shape
-
-# %% [raw] vscode={"languageId": "raw"}
-# from torch.utils.data import DataLoader, Subset
-# Subset?
-
-# %% [raw]
-# DataLoader?

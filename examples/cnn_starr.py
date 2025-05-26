@@ -1,38 +1,50 @@
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import lightning as L
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-
 from sklearn.metrics import mean_squared_error
 from scipy import stats
-
+from pytorch_lightning.loggers import TensorBoardLogger
+from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
 
-class CNNSTARR(L.LightningModule):
+class BrainMagnetCNN(L.LightningModule):
     def __init__(
         self,
-        lr: float = 0.01,
-        weight_decay: float = 0,
-        log_vars_prefix: str = "NSC",
-        forward_mode: Literal["main", "revcomp", "both"] = "both",
+        learning_rate: float = 0.01,
+        weight_decay: float = 1e-6,
+        forward_mode: Literal["forward", "reverse_complement", "average"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
+        **hyper_params,
     ):
         super().__init__()
-        self.lr = lr
+        self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        if forward_mode not in {"forward", "reverse_complement", "average"}:
+            raise ValueError(f"{forward_mode = }")
         self.forward_mode = forward_mode
-        self.log_vars_prefix = log_vars_prefix
+
+        hyper_params["learning_rate"] = learning_rate
+        hyper_params["weight_decay"] = weight_decay
+        hyper_params["forward_mode"] = forward_mode
+        # Save hyperparameters for logging purposes.
+        # Calling this method seems to work only from the __init__ method.
+        # logger=False is used to avoid logging an initial `hp_metric=-1`.
+        self.save_hyperparameters(hyper_params, logger=False)
+
         self.loss_fn = loss_fn
 
         self.prev_epoch: Optional[int] = None
-        self.batches_losses: List[float] = []
+        self.losses: List[float] = []
 
-        # TODO add notes about layer types to avoid for simplicity of the downstream
-        #   SHAP analysis, i.e. motif discovery.
+        # ! Avoid Layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
+        # ! downstream SHAP analysis, i.e. motif discovery.
+        # ! Such layers are tricky to deal with for the SHAP analysis, even if solutions
+        # ! exist, there might caveats and performance issues.
         self.model = nn.Sequential(
             nn.Conv1d(4, 16, kernel_size=15, padding="same"),
             nn.BatchNorm1d(16),
@@ -63,17 +75,16 @@ class CNNSTARR(L.LightningModule):
         )
 
     def forward(self, x):
-        if self.forward_mode == "main":
-            res = self.model(x)
-        elif self.forward_mode == "revcomp":
-            res = self.model(ut.tensor_reverse_complement(x))
-        elif self.forward_mode == "both":
+        if self.forward_mode == "forward":
+            return self.model(x)
+        elif self.forward_mode == "reverse_complement":
+            return self.model(ut.tensor_reverse_complement(x))
+        elif self.forward_mode == "average":
             res_fwd = self.model(x)
             res_rc = self.model(ut.tensor_reverse_complement(x))
-            res = (res_fwd + res_rc) / 2  # take the average
+            return (res_fwd + res_rc) / 2  # take the average
         else:
             raise ValueError(f"{self.forward_mode = }")
-        return res
 
     def _step(self, batch, batch_idx, suffix: str):
         inputs, targets = batch
@@ -82,30 +93,36 @@ class CNNSTARR(L.LightningModule):
         out = self(inputs)
         loss: float = self.loss_fn(out, targets)
 
-        if suffix == "train":
-            if self.prev_epoch != self.current_epoch:
-                self.prev_epoch = self.current_epoch
-                self.batches_losses = []  # new epoch, reset
-            self.batches_losses.append(loss)
-            # Average across the epoch batches
-            # ! This not equivalent to the loss that is obtained by evaluating the
-            # ! end-of-epoch model on the entire training set. This is because the
-            # ! weights are updated after each batch.
-            loss_log = sum(self.batches_losses) / len(self.batches_losses)
-        else:
-            loss_log = loss
+        self.losses.append(loss)
+        # Average across the epoch batches
+        # ! This not equivalent to the loss that is obtained by evaluating the
+        # ! end-of-epoch model on the entire training set. This is because the
+        # ! weights are updated after each batch.
+        loss_log = sum(self.losses) / len(self.losses)
+
+        # Skip logging if `lightning` is in sanity checking mode.
+        if self.trainer.sanity_checking:
+            return loss
 
         # Log the training loss (this shows up in TensorBoard)
         self.log(
             # This var is used by the EarlyStopping
-            f"{self.log_vars_prefix}_loss_{suffix}",
+            f"loss/{suffix}",
             loss_log,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
-
         return loss
+
+    def on_train_epoch_start(self):
+        self.losses = []
+
+    def on_validation_epoch_start(self):
+        self.losses = []
+
+    def on_test_epoch_start(self):
+        self.losses = []
 
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, suffix="train")
@@ -118,39 +135,93 @@ class CNNSTARR(L.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
         )
 
 
 class EpochCheckpoint(L.Callback):
-    def __init__(self, task: str = "ESC"):
+    def __init__(self):
         super().__init__()
-        self.task = task
+        self.best_val: Optional[torch.Tensor] = None
+        self.last_train: Optional[torch.Tensor] = None
 
-    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module):
-        val_loss = trainer.callback_metrics.get(f"{self.task}_loss_val")
-        train_loss = trainer.callback_metrics.get(f"{self.task}_loss_train")
-        if val_loss is not None and train_loss is not None:
-            checkpoint_dir = Path(trainer.logger.log_dir) / "epoch_checkpoints"
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            fn = f"{self.task}_ep{trainer.current_epoch:02d}_vloss{int(val_loss * 1000):04d}_tloss{int(train_loss * 1000):04d}.pt"
-            fp = checkpoint_dir / fn
-            torch.save(pl_module.state_dict(), fp)
+    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: BrainMagnetCNN):
+        """Gets called after validation epoch ends"""
+        if trainer.sanity_checking:
+            return
+
+        assert trainer.logger is not None and trainer.logger.log_dir is not None
+        checkpoint_dir = Path(trainer.logger.log_dir) / "epoch_checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        fn = f"ep{trainer.current_epoch:03d}.pt"
+        fp = checkpoint_dir / fn
+        torch.save(pl_module.state_dict(), fp)
+
+        self.last_train = trainer.callback_metrics.get("loss/train")
+        assert self.last_train is not None
+        val_loss = trainer.callback_metrics.get("loss/val")
+        assert val_loss is not None
+
+        # So that we can compare between training runs with different hyperparameters.
+        assert trainer.logger is not None
+        if self.best_val is None:
+            self.best_val = val_loss
+
+            # ! This must be called only once. Calling it allows to keep track of
+            # ! this metric in the HPARAMS tab of the TensorBoard.
+            trainer.logger.log_hyperparams(
+                params=pl_module.hparams,  # type: ignore
+                metrics={
+                    "best_val": self.best_val,
+                    "train_at_best_val": self.last_train,
+                },
+            )
+
+            writer: SummaryWriter = trainer.logger.experiment  # type: ignore
+            # This allows to plot both losses in the same chart under the
+            # "CUSTOM SCALARS" tab of TensorBoard.
+            # This is the most neat way to do it.
+            # ! Must be called only once.
+            writer.add_custom_scalars_multilinechart(
+                ["loss/train", "loss/val"],
+                category="main",
+                title="losses",
+            )
+
+        if val_loss < self.best_val:
+            self.best_val = val_loss
+            pl_module.log(
+                "best_val",
+                self.best_val,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            assert self.last_train is not None
+            pl_module.log(
+                "train_at_best_val",
+                self.last_train,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
 
 def load_model(
     fp: Path,
     device: torch.device,
-    forward_mode: Literal["main", "revcomp", "both"] = "main",
+    **kwargs_model,
 ):
-    model = CNNSTARR(forward_mode=forward_mode, log_vars_prefix="")
+    model = BrainMagnetCNN(**kwargs_model)
     model.to(device)
     model.load_state_dict(torch.load(fp))
     model.to(device)
     return model
 
 
-def eval_model(model: CNNSTARR, dataloader: DataLoader, device):
+def eval_model(model: BrainMagnetCNN, dataloader: DataLoader, device):
     preds = []
     targets = []
 

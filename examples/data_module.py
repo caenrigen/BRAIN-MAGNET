@@ -1,6 +1,6 @@
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
@@ -23,9 +23,9 @@ def bins_log2(s, n: int = 8):
 
 
 class MemMapDataset(Dataset):
-    def __init__(self, fp_npy_1hot_seqs: str, targets: np.ndarray):
-        self.seqs_1hot = np.load(fp_npy_1hot_seqs, mmap_mode="r")
+    def __init__(self, fp_npy_1hot_seqs: Path, targets: np.ndarray):
         self.targets = targets
+        self.seqs_1hot = np.load(fp_npy_1hot_seqs, mmap_mode="r")
 
         if len(self.seqs_1hot) != len(self.targets):
             raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
@@ -74,13 +74,15 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
 class DataModule(L.LightningDataModule):
     def __init__(
         self,
-        fp_npy_1hot_seqs: str,
         targets: np.ndarray,
+        fp_npy_1hot_seqs: Path,
+        fp_npy_1hot_seqs_rev_comp: Optional[Path] = None,
         random_state: int = 913,
         n_folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to n_folds-1)
         frac_for_test: float = 0.10,
         frac_for_val: float = 0.10,
+        validate_split: bool = True,
         bins_func: Callable = bins_log2,
         # DataLoader kwargs:
         batch_size: int = 128,
@@ -108,23 +110,33 @@ class DataModule(L.LightningDataModule):
 
         if n_folds is not None and fold >= n_folds:
             raise ValueError(f"{fold = } must be less than {n_folds = }")
-        self.n_folds = n_folds
+        self.n_folds = n_folds or None  # 0 is equivalent to no folds
         self.fold = fold
         self.frac_for_test = frac_for_test
         self.frac_for_val = frac_for_val
         self.bins_func = bins_func
-
-        self.dataset = MemMapDataset(
+        self.validate_split = validate_split
+        self.dataset_fwd = MemMapDataset(
             fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
             targets=self.targets,
         )
+
+        if fp_npy_1hot_seqs_rev_comp:
+            self.dataset_rev = MemMapDataset(
+                fp_npy_1hot_seqs=fp_npy_1hot_seqs_rev_comp,
+                targets=self.targets,
+            )
+            self.dataset = ConcatDataset([self.dataset_fwd, self.dataset_rev])
+        else:
+            self.dataset_rev = None
+            self.dataset = self.dataset_fwd
 
         if persistent_workers is None:
             persistent_workers = num_workers > 0
 
         self.DataLoader = partial(
             DataLoader,
-            shuffle=False,
+            shuffle=False,  # we already shuffle the indices
             collate_fn=collate,
             num_workers=num_workers,
             multiprocessing_context=multiprocessing_context,
@@ -133,20 +145,29 @@ class DataModule(L.LightningDataModule):
             **self.dataloader_kwargs,
         )
 
+    def concat_rev(self, indices):
+        if self.dataset_rev:
+            indices = np.asarray(indices, dtype=np.int64)
+            # Interleave forward and reverse complement indices, instead of simply
+            # concatenating them. Might help to learn faster.
+            # return np.concatenate([indices, indices + len(self.targets)])
+            return np.stack([indices, indices + len(self.targets)]).T.flatten()
+        return indices
+
     def prepare_data(self):
+        indices_train_val = np.arange(len(self.targets))
         if self.frac_for_test:
             # Put aside a fraction of the data for a final testing
             indices_train_val, self.indices_test = train_test_split(
-                np.arange(len(self.targets)),
+                indices_train_val,
                 test_size=self.frac_for_test,
                 random_state=self.random_state,
                 stratify=self.bins_func(self.targets),
                 shuffle=True,  # stratify requires shuffle=True
             )
-        else:
-            indices_train_val = np.arange(len(self.targets))
+            self.indices_test = self.concat_rev(self.indices_test)
 
-        # Make a train/val split, simple or k-folds cross-validated
+        # Make a train/val split, simple or k-folds for cross-validation
 
         if self.n_folds is not None:
             kf = StratifiedKFold(
@@ -157,47 +178,55 @@ class DataModule(L.LightningDataModule):
             targets_train_val = self.targets[indices_train_val]
             # X is dummy, it is not relevant for stratified splitting
             split = kf.split(X=targets_train_val, y=self.bins_func(targets_train_val))
-            for i, (train_indices, val_indices) in enumerate(split):
-                if i == self.fold:
-                    assert len(val_indices) < len(train_indices)
-                    # Get the real indices
-                    self.indices_train = indices_train_val[train_indices]
-                    self.indices_val = indices_train_val[val_indices]
-                    break
+            for i, (train_idxs, val_idxs) in enumerate(split):
+                if i != self.fold:
+                    continue  # only run for the current fold, continue otherwise
+                assert len(val_idxs) < len(train_idxs)
+                self.indices_train = self.concat_rev(indices_train_val[train_idxs])
+                self.indices_val = self.concat_rev(indices_train_val[val_idxs])
         else:
-            self.indices_train, self.indices_val = train_test_split(
+            indices_train, indices_val = train_test_split(
                 indices_train_val,
                 test_size=self.frac_for_val,
                 random_state=self.random_state,
                 stratify=self.bins_func(self.targets[indices_train_val]),
                 shuffle=True,  # stratify requires shuffle=True
             )
+            self.indices_train = self.concat_rev(indices_train)
+            self.indices_val = self.concat_rev(indices_val)
 
-        self.validate_data_split()
+        if self.validate_split:
+            self.validate_data_split()
 
     def validate_data_split(self):
         assert self.indices_train is not None
         assert self.indices_val is not None
 
-        # The train and val sets must be disjoint
-        set_all = set(np.arange(len(self.targets)))
         set_train = set(self.indices_train)
         set_val = set(self.indices_val)
+        # The train and val sets must be disjoint
         assert set_train & set_val == set(), f"{set_train = } != {set_val = }"
 
-        t = len(self.indices_train) + len(self.indices_val)
-        s = set_train | set_val
+        num_samples = len(self.indices_train) + len(self.indices_val)
+        unique_samples = set_train | set_val
 
         if self.frac_for_test:
             assert self.indices_test is not None
             set_test = set(self.indices_test)
             assert set_test & set_train == set()
             assert set_test & set_val == set()
-            t += len(self.indices_test)
-            s |= set_test
-        # The data split must must cover the whole dataset
-        assert t == len(self.targets), f"{t = } != {len(self.targets) = }"
-        assert s == set_all
+            num_samples += len(self.indices_test)
+            unique_samples |= set_test
+
+        len_targets = len(self.targets)
+        if self.dataset_rev:
+            len_targets *= 2
+
+        # The data split must cover the whole dataset
+        assert num_samples == len_targets, f"{num_samples = } != {len_targets = }"
+        assert len(unique_samples) == len_targets, (
+            f"{len(unique_samples) = } != {len_targets = }"
+        )
 
     def setup(self, stage: Optional[str] = None):
         pass

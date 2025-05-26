@@ -26,7 +26,9 @@ HASH_TABLE = make_one_hot_encode()
 
 
 def one_hot_encode(
-    sequence: str, pad_to: Optional[int] = None, transpose: bool = False
+    sequence: str,
+    pad_to: Optional[int] = None,
+    transpose: bool = False,
 ):
     one_hot = HASH_TABLE[to_uint8(sequence)]
     if pad_to is not None:
@@ -56,11 +58,15 @@ def unpad_one_hot(one_hot: np.ndarray):
     return one_hot[one_hot.sum(axis=1, dtype=np.bool)]
 
 
-def one_hot_reverse_complement(one_hot):
-    assert one_hot.shape[-1] == 4, one_hot.shape
+def one_hot_reverse_complement(one_hot, is_transposed: bool = False):
     # Swap A <-> T and C <-> G channels. Channel order is (A=0, C=1, G=2, T=3)
     channel_map = [3, 2, 1, 0]  # T, G, C, A
-    return np.flip(one_hot, axis=0)[:, channel_map]
+    if is_transposed:
+        assert one_hot.shape[0] == 4, one_hot.shape
+        return np.flip(one_hot, axis=0)[channel_map, :]
+    else:
+        assert one_hot.shape[1] == 4, one_hot.shape
+        return np.flip(one_hot, axis=1)[:, channel_map]
 
 
 def tensor_reverse_complement(x: torch.Tensor):

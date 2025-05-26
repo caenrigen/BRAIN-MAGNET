@@ -18,6 +18,7 @@ from pathlib import Path
 import gc
 from random import randbytes
 from tqdm.auto import tqdm
+import pandas as pd
 
 import torch
 import lightning as L
@@ -42,52 +43,6 @@ device
 import cnn_starr as cnn
 import data_module as dm
 
-# %% [raw] vscode={"languageId": "raw"}
-# # Logs
-# - 347bc336: lr=0.001, weight_decay=1e-6, dropout=0.1
-# - 288fa45b: lr=0.0005, weight_decay=1e-6, dropout=0.1
-# - 3dc19952: lr=0.0001, weight_decay=1e-6, dropout=0.1
-# - 04b9c60f: lr=0.0001, weight_decay=1e-7, dropout=0.1
-# - 86aa4f1d: lr=0.001, weight_decay=5e-6, dropout=0.1
-# - 1fcdfb89: lr=0.005, weight_decay=1e-5, dropout=0.1
-# - ca9be902: lr=0.01, weight_decay=8e-6, dropout=0.1
-# - e7dcf63e: lr=0.01, weight_decay=5e-6, dropout=0.1
-# - 91f17bcc: lr=0.01, weight_decay=2e-6, dropout=0.1
-# - c92d9749: lr=0.01, weight_decay=1e-6, dropout=0.1, 0.05, 64->32 head
-# - 2ae21203: lr=0.01, weight_decay=1e-6, dropout=0.1, 64->32
-# - a3604d58: lr=0.01, weight_decay=1e-6, dropout=0.1, 32->16 all
-# - ebd0e997: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13), ...)
-# - af2f90f7: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15), ...), 11(?), 9(?)
-# - 674707d4: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13), ...), 9, 7
-# - a8099c41: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 11/9/7), ...)
-# - 6adb5711: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15/13/11), ...)
-# - a5ffba4d: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 17/15/13), ...)
-# - cd8eaa74: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 13/11/9), ...)
-# ---
-# - 2b336432: lr=0.01, weight_decay=1e-6, dropout=0.1, 16 all except nn.Conv2d(4, 32, kernel_size=(1, 15/13/11), ...)
-# - f219f565: 2b336432 but with augment=4
-# - a8e7dd9b: f219f565 but with augment=8
-# ---
-# - d2dd90b5: f219f565 but no backbone+head
-# ---
-# - 4cdb5f99: fixed the data module to keep test set separate
-# ---
-# - 44c93be6/: no test, 5% val
-# ---
-# - f952c4c5: no test, 5% val, log2log2norm targets
-# ---
-# - c8d9a9e7: ???
-# - 82c66f85: no test, 5% val, augment=6, final(?)
-# - 26a38237: no test, 5% val, augment=6, 16/16, 15/13/11 experiment
-# - f4ceccfc: no test, 5% val, augment=6, 16/16, 13/11/9 experiment
-# - 6fb254fd: no test, 5% val, augment=6, 16/16, 17/15/13 experiment
-# - b854ab5f: no test, 5% val, augment=4, 16/16, 15/13/11, final
-# - 050ccf4e: no test, 5% val, augment=10, 16/16, 15/13/11
-# - f9bd95fa: no test, 5% val, augment=4, all 16, 15/13/11, AvgPool2d
-# - 02fe8ebd: no test, 5% val, augment=4, all 16, 15/13/11, swap conv2d->conv1d
-# - 5a41adbe: no test, 5% val, augment=None, all 16, 15/13/11, swap conv2d->conv1d
-# - cc0e922b: no test, 5% val, augment=None, all 16, 15/13/11, Conv1D, fixed loss logging
-
 # %%
 task = "ESC"
 y_col = f"{task}_log2_enrichment"
@@ -96,53 +51,67 @@ targets = pd.read_csv(fp, usecols=[y_col])[y_col].to_numpy()
 targets.shape
 
 # %%
-# fp_npy_1hot_seqs = dbmrd / "seqs_shape(5000,4,1000).npy"
+# fp_npy_1hot_seqs = dbmrd / "seqs(5000,4,1000).npy"
 # targets = targets[:5000]
 
-fp_npy_1hot_seqs = dbmrd / "seqs_shape(148114,4,1000).npy"
+fp_npy_1hot_seqs = dbmrd / "seqs(148114,4,1000).npy"
 assert fp_npy_1hot_seqs.exists()
+fp_npy_1hot_seqs_rev_comp = dbmrd / "seqs_rev_comp(148114,4,1000).npy"
+assert fp_npy_1hot_seqs_rev_comp.exists()
+
 
 # %%
 gc.collect()
 torch.mps.empty_cache()
 
-# %% [raw] vscode={"languageId": "raw"}
-# Old data loader: ~4 min, 4.5-5GB
-# New data loader: ~4 min, 1.8GB
-# 512 batch size: ~2 min
-
 # %%
 version = randbytes(4).hex()
 print(f"{version = }")
-sample = None
 
-n_folds = None
+batch_size = 256
+learning_rate = 0.01
+weight_decay = 1e-6
+
+n_folds = 5
 folds = range(n_folds) if n_folds else []
-# folds = [0]
+frac_for_val = 0.0  # only relevant if not using n_folds
 
-max_epochs = 10
+max_epochs = 50
 
-frac_for_test = 0
-frac_for_val = 0.05
+# Fraction of the initial dataset to set aside for testing.
+# 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
+frac_for_test = 0.05
 
 
-def train(fold: int = 0):
-    model = cnn.CNNSTARR(
-        lr=0.01,  # learning rate
-        weight_decay=1e-6,
-        log_vars_prefix=task,
+def train(version: str, fold: int, batch_size: int):
+    model = cnn.BrainMagnetCNN(
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        # Don't change this for training, reverse complement is handled by the data
+        # module as augmentation data.
+        forward_mode="forward",
+        # The rest are hyperparameters for logging purposes.
+        task=task,
+        batch_size=batch_size,
+        frac_for_test=frac_for_test,
+        frac_for_val=frac_for_val,
+        n_folds=n_folds,
+        fold=fold,
+        num_samples=len(targets),
+        max_epochs=max_epochs,
     )
     model.to(device)
 
     data_loader = dm.DataModule(
-        fp_npy_1hot_seqs=str(fp_npy_1hot_seqs),
+        fp_npy_1hot_seqs=fp_npy_1hot_seqs,
+        fp_npy_1hot_seqs_rev_comp=fp_npy_1hot_seqs_rev_comp,
         targets=targets,
-        n_folds=n_folds,
+        n_folds=n_folds or None,
         fold=fold,
         frac_for_test=frac_for_test,
         frac_for_val=frac_for_val,
         # DataLoader kwargs:
-        batch_size=512,
+        batch_size=batch_size,
         # These might give some speed up if cuda is available
         # pin_memory=True,
         # pin_memory_device="cuda",
@@ -150,14 +119,16 @@ def train(fold: int = 0):
 
     logger = TensorBoardLogger(
         dbmt,
-        name=f"starr_{task}",
+        name=task,
         version=version,
         sub_dir=f"fold_{fold}",
+        default_hp_metric=True,
     )
     trainer = L.Trainer(
+        accelerator="mps",
         max_epochs=max_epochs,
         logger=logger,
-        callbacks=[cnn.EpochCheckpoint(task=task)],
+        callbacks=[cnn.EpochCheckpoint()],
     )
 
     try:
@@ -179,11 +150,10 @@ if n_folds:
     for fold in tqdm(folds, desc="Folds"):
         # if fold < 4:
         #     continue
-        res = train(fold=fold)
+        res = train(fold=fold, version=version, batch_size=batch_size)
         if not res:
             break
 else:
-    fold = 0
-    res = train(fold=fold)
+    res = train(fold=0, version=version, batch_size=batch_size)
 
 # %%
