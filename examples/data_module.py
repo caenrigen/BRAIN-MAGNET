@@ -78,10 +78,10 @@ class DataModule(L.LightningDataModule):
         fp_npy_1hot_seqs: Path,
         fp_npy_1hot_seqs_rev_comp: Optional[Path] = None,
         random_state: int = 913,
-        n_folds: Optional[int] = None,  # Number of folds for cross-validation
-        fold: int = 0,  # Current fold index (0 to n_folds-1)
-        frac_for_test: float = 0.10,
-        frac_for_val: float = 0.10,
+        folds: Optional[int] = None,  # Number of folds for cross-validation
+        fold: int = 0,  # Current fold index (0 to folds-1)
+        frac_test: float = 0.10,
+        frac_val: float = 0.10,
         validate_split: bool = True,
         bins_func: Callable = bins_log2,
         # DataLoader kwargs:
@@ -108,12 +108,12 @@ class DataModule(L.LightningDataModule):
         self.random_state = random_state
         self.dataloader_kwargs = dataloader_kwargs
 
-        if n_folds is not None and fold >= n_folds:
-            raise ValueError(f"{fold = } must be less than {n_folds = }")
-        self.n_folds = n_folds or None  # 0 is equivalent to no folds
+        if folds is not None and fold >= folds:
+            raise ValueError(f"{fold = } must be less than {folds = }")
+        self.folds = folds or None  # 0 is equivalent to no folds
         self.fold = fold
-        self.frac_for_test = frac_for_test
-        self.frac_for_val = frac_for_val
+        self.frac_test = frac_test
+        self.frac_val = frac_val
         self.bins_func = bins_func
         self.validate_split = validate_split
         self.dataset_fwd = MemMapDataset(
@@ -156,11 +156,11 @@ class DataModule(L.LightningDataModule):
 
     def prepare_data(self):
         indices_train_val = np.arange(len(self.targets))
-        if self.frac_for_test:
+        if self.frac_test:
             # Put aside a fraction of the data for a final testing
             indices_train_val, self.indices_test = train_test_split(
                 indices_train_val,
-                test_size=self.frac_for_test,
+                test_size=self.frac_test,
                 random_state=self.random_state,
                 stratify=self.bins_func(self.targets),
                 shuffle=True,  # stratify requires shuffle=True
@@ -169,9 +169,9 @@ class DataModule(L.LightningDataModule):
 
         # Make a train/val split, simple or k-folds for cross-validation
 
-        if self.n_folds is not None:
+        if self.folds is not None:
             kf = StratifiedKFold(
-                n_splits=self.n_folds,
+                n_splits=self.folds,
                 shuffle=True,
                 random_state=self.random_state,
             )
@@ -187,7 +187,7 @@ class DataModule(L.LightningDataModule):
         else:
             indices_train, indices_val = train_test_split(
                 indices_train_val,
-                test_size=self.frac_for_val,
+                test_size=self.frac_val,
                 random_state=self.random_state,
                 stratify=self.bins_func(self.targets[indices_train_val]),
                 shuffle=True,  # stratify requires shuffle=True
@@ -210,7 +210,7 @@ class DataModule(L.LightningDataModule):
         num_samples = len(self.indices_train) + len(self.indices_val)
         unique_samples = set_train | set_val
 
-        if self.frac_for_test:
+        if self.frac_test:
             assert self.indices_test is not None
             set_test = set(self.indices_test)
             assert set_test & set_train == set()

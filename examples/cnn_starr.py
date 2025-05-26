@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import List, Literal, Optional
 
 import lightning as L
 import torch
@@ -7,7 +7,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 from sklearn.metrics import mean_squared_error
 from scipy import stats
-from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
@@ -28,9 +27,10 @@ class BrainMagnetCNN(L.LightningModule):
             raise ValueError(f"{forward_mode = }")
         self.forward_mode = forward_mode
 
-        hyper_params["learning_rate"] = learning_rate
-        hyper_params["weight_decay"] = weight_decay
-        hyper_params["forward_mode"] = forward_mode
+        # Keep the names short to see more columns in the TensorBoard.
+        hyper_params["lr"] = learning_rate
+        hyper_params["wd"] = weight_decay
+        hyper_params["fm"] = forward_mode
         # Save hyperparameters for logging purposes.
         # Calling this method seems to work only from the __init__ method.
         # logger=False is used to avoid logging an initial `hp_metric=-1`.
@@ -144,8 +144,9 @@ class BrainMagnetCNN(L.LightningModule):
 class EpochCheckpoint(L.Callback):
     def __init__(self):
         super().__init__()
-        self.best_val: Optional[torch.Tensor] = None
-        self.last_train: Optional[torch.Tensor] = None
+        self.min_vloss: Optional[torch.Tensor] = None
+        # Corresponds training loss at the best validation loss.
+        self.tloss: Optional[torch.Tensor] = None
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: BrainMagnetCNN):
         """Gets called after validation epoch ends"""
@@ -159,23 +160,21 @@ class EpochCheckpoint(L.Callback):
         fp = checkpoint_dir / fn
         torch.save(pl_module.state_dict(), fp)
 
-        self.last_train = trainer.callback_metrics.get("loss/train")
-        assert self.last_train is not None
-        val_loss = trainer.callback_metrics.get("loss/val")
-        assert val_loss is not None
+        tloss = trainer.callback_metrics.get("loss/train")
+        assert tloss is not None
+        vloss = trainer.callback_metrics.get("loss/val")
+        assert vloss is not None
 
         # So that we can compare between training runs with different hyperparameters.
         assert trainer.logger is not None
-        if self.best_val is None:
-            self.best_val = val_loss
-
+        if self.min_vloss is None:
             # ! This must be called only once. Calling it allows to keep track of
             # ! this metric in the HPARAMS tab of the TensorBoard.
             trainer.logger.log_hyperparams(
                 params=pl_module.hparams,  # type: ignore
                 metrics={
-                    "hp/best_vloss": self.best_val,
-                    "hp/tloss_at_best_vloss": self.last_train,
+                    "hp/min_vloss": vloss,
+                    "hp/tloss": tloss,
                 },
             )
 
@@ -190,23 +189,27 @@ class EpochCheckpoint(L.Callback):
                 title="losses",
             )
 
-        if val_loss < self.best_val:
-            self.best_val = val_loss
-            pl_module.log(
-                "hp/best_vloss",
-                self.best_val,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
-            assert self.last_train is not None
-            pl_module.log(
-                "hp/tloss_at_best_vloss",
-                self.last_train,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
+        if self.min_vloss is None or vloss < self.min_vloss:
+            self.min_vloss = vloss
+            self.tloss = tloss
+
+        assert self.tloss is not None
+        # Log both on each epoch end to keep the plots pretty, instead of logging only
+        # when there is a new best value.
+        pl_module.log(
+            "hp/min_vloss",
+            self.min_vloss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        pl_module.log(
+            "hp/tloss",
+            self.tloss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 def load_model(

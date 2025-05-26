@@ -72,15 +72,15 @@ batch_size = 256
 learning_rate = 0.01
 weight_decay = 1e-6
 
-n_folds = 5
-folds = range(n_folds) if n_folds else []
-frac_for_val = 0.0  # only relevant if not using n_folds
+folds = 5
+folds_list = range(folds) if folds else []
+frac_val = 0.0  # only relevant if not using folds
 
 max_epochs = 50
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
-frac_for_test = 0.05
+frac_test = 0.90
 
 
 def train(version: str, fold: int, batch_size: int):
@@ -93,12 +93,12 @@ def train(version: str, fold: int, batch_size: int):
         # The rest are hyperparameters for logging purposes.
         task=task,
         batch_size=batch_size,
-        frac_for_test=frac_for_test,
-        frac_for_val=frac_for_val,
-        n_folds=n_folds,
+        frac_test=frac_test,
+        frac_val=frac_val,
+        folds=folds,
         fold=fold,
-        num_samples=len(targets),
-        max_epochs=max_epochs,
+        samples=len(targets),
+        max_ep=max_epochs,
     )
     model.to(device)
 
@@ -106,10 +106,10 @@ def train(version: str, fold: int, batch_size: int):
         fp_npy_1hot_seqs=fp_npy_1hot_seqs,
         fp_npy_1hot_seqs_rev_comp=fp_npy_1hot_seqs_rev_comp,
         targets=targets,
-        n_folds=n_folds or None,
+        folds=folds or None,
         fold=fold,
-        frac_for_test=frac_for_test,
-        frac_for_val=frac_for_val,
+        frac_test=frac_test,
+        frac_val=frac_val,
         # DataLoader kwargs:
         batch_size=batch_size,
         # These might give some speed up if cuda is available
@@ -146,8 +146,8 @@ def train(version: str, fold: int, batch_size: int):
     return True
 
 
-if n_folds:
-    for fold in tqdm(folds, desc="Folds"):
+if folds:
+    for fold in tqdm(folds_list, desc="Folds"):
         # if fold < 4:
         #     continue
         res = train(fold=fold, version=version, batch_size=batch_size)
