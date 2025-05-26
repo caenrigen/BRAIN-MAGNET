@@ -174,8 +174,8 @@ class EpochCheckpoint(L.Callback):
             trainer.logger.log_hyperparams(
                 params=pl_module.hparams,  # type: ignore
                 metrics={
-                    "best_val": self.best_val,
-                    "train_at_best_val": self.last_train,
+                    "hp/best_vloss": self.best_val,
+                    "hp/tloss_at_best_vloss": self.last_train,
                 },
             )
 
@@ -193,7 +193,7 @@ class EpochCheckpoint(L.Callback):
         if val_loss < self.best_val:
             self.best_val = val_loss
             pl_module.log(
-                "best_val",
+                "hp/best_vloss",
                 self.best_val,
                 on_step=False,
                 on_epoch=True,
@@ -201,7 +201,7 @@ class EpochCheckpoint(L.Callback):
             )
             assert self.last_train is not None
             pl_module.log(
-                "train_at_best_val",
+                "hp/tloss_at_best_vloss",
                 self.last_train,
                 on_step=False,
                 on_epoch=True,
