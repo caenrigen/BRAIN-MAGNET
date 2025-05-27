@@ -15,7 +15,7 @@ class BrainMagnetCNN(L.LightningModule):
     def __init__(
         self,
         learning_rate: float = 0.01,
-        weight_decay: float = 1e-6,
+        weight_decay: float = 0.0,
         forward_mode: Literal["forward", "reverse_complement", "average"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
         **hyper_params,
@@ -50,27 +50,26 @@ class BrainMagnetCNN(L.LightningModule):
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.AvgPool1d(2),
-            nn.Dropout(0.1),
             nn.Conv1d(16, 16, kernel_size=13, padding="same"),
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.AvgPool1d(2),
-            nn.Dropout(0.1),
             nn.Conv1d(16, 16, kernel_size=11, padding="same"),
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.AvgPool1d(2),
-            nn.Dropout(0.1),
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),  # to be able to input into linear layer
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            # Did not seem to be needed. The model is already small and the BatchNorm
+            # is already taking care of regularization.
+            # nn.Dropout(0.1),
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            # nn.Dropout(0.1),
             nn.Linear(16, 1),
         )
 
@@ -134,7 +133,9 @@ class BrainMagnetCNN(L.LightningModule):
         return self._step(batch, batch_idx, suffix="test")
 
     def configure_optimizers(self):
-        return torch.optim.Adam(
+        # Using AdamW which is supposed to deal more correctly with weight decay,
+        # in case we ever need a weight decay.
+        return torch.optim.AdamW(
             self.parameters(),
             lr=self.learning_rate,
             weight_decay=self.weight_decay,

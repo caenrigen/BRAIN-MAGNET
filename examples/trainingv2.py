@@ -70,23 +70,21 @@ print(f"{version = }")
 
 batch_size = 256
 learning_rate = 0.01
-weight_decay = 1e-6
 
 folds = 5
 folds_list = range(folds) if folds else []
-frac_val = 0.0  # only relevant if not using folds
+frac_val = 0.10  # only relevant if not using folds
 
-max_epochs = 50
+max_epochs = 30
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
-frac_test = 0.90
+frac_test = 0.00
 
 
 def train(version: str, fold: int, batch_size: int):
     model = cnn.BrainMagnetCNN(
         learning_rate=learning_rate,
-        weight_decay=weight_decay,
         # Don't change this for training, reverse complement is handled by the data
         # module as augmentation data.
         forward_mode="forward",
@@ -148,8 +146,6 @@ def train(version: str, fold: int, batch_size: int):
 
 if folds:
     for fold in tqdm(folds_list, desc="Folds"):
-        # if fold < 4:
-        #     continue
         res = train(fold=fold, version=version, batch_size=batch_size)
         if not res:
             break
