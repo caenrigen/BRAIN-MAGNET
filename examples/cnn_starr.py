@@ -40,16 +40,10 @@ class BrainMagnetCNN(L.LightningModule):
         self.save_hyperparameters(hyper_params, logger=False)
 
         self.loss_fn = loss_fn
-
         # Auxiliary variable to estimate the Pearson correlation.
         # It is handy to observe the Pearson correlation in the TensorBoard, its value
         # is more intuitive than the values of the MSE loss function.
         self.cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
-
-        self.prev_epoch: Optional[int] = None
-        # List of scalar tensors, one per epoch.
-        self.losses: List[torch.Tensor] = []
-        self.pearsons: List[torch.Tensor] = []
 
         # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
         # ! downstream SHAP analysis, i.e. motif discovery.
@@ -105,45 +99,21 @@ class BrainMagnetCNN(L.LightningModule):
         loss: torch.Tensor = self.loss_fn(out, targets)
         pearson: torch.Tensor = pearson_correlation(out, targets, self.cos_sim)
 
-        self.losses.append(loss)
-        self.pearsons.append(pearson)
-
-        # Average across the epoch batches
-        # ! This not equivalent to the loss that is obtained by evaluating the
-        # ! end-of-epoch model on the entire training set. This is because the
-        # ! weights are updated after each batch.
-        loss_log = sum(self.losses) / len(self.losses)
-        pearson_log = sum(self.pearsons) / len(self.pearsons)
         # Skip logging if `lightning` is in sanity checking mode.
         if self.trainer.sanity_checking:
             return loss
 
-        # Log the training loss (this shows up in TensorBoard)
-        self.log(
-            f"loss/{suffix}",
-            loss_log,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.log(
-            f"pearson/{suffix}",
-            pearson_log,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-        )
+        # Logs the loss and pearson correlation (this shows up in TensorBoard)
+
+        # The logging will average automatically over the batches of the epoch.
+        # ! This is not equivalent to the loss that is obtained by evaluating the
+        # ! end-of-epoch model on the entire training/validation/test set. This is
+        # ! because the weights of the model are updated after each batch.
+        log = partial(self.log, on_step=False, on_epoch=True)
+        log(f"loss/{suffix}", loss, prog_bar=True)
+        log(f"pearson/{suffix}", pearson, prog_bar=False)
 
         return loss
-
-    def on_train_epoch_start(self):
-        self.losses = []
-
-    def on_validation_epoch_start(self):
-        self.losses = []
-
-    def on_test_epoch_start(self):
-        self.losses = []
 
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, suffix="train")
@@ -167,7 +137,7 @@ class BrainMagnetCNN(L.LightningModule):
 class EpochCheckpoint(L.Callback):
     def __init__(self):
         super().__init__()
-        self.min_vloss: Optional[torch.Tensor] = None
+        self.vloss_min: Optional[torch.Tensor] = None
         # Corresponds training loss at the best validation loss.
         self.tloss: Optional[torch.Tensor] = None
 
@@ -195,13 +165,13 @@ class EpochCheckpoint(L.Callback):
 
         # So that we can compare between training runs with different hyperparameters.
         assert trainer.logger is not None
-        if self.min_vloss is None:
+        if self.vloss_min is None:
             # ! This must be called only once. Calling it allows to keep track of
             # ! this metric in the HPARAMS tab of the TensorBoard.
             trainer.logger.log_hyperparams(
                 params=pl_module.hparams,  # type: ignore
                 metrics={
-                    "hp/min_vloss": vloss,
+                    "hp/vloss_min": vloss,
                     "hp/tloss": tloss,
                     "hp/tpearson": tpearson,
                     "hp/vpearson": vpearson,
@@ -224,20 +194,20 @@ class EpochCheckpoint(L.Callback):
                 title="pearson",
             )
 
-        if self.min_vloss is None or vloss < self.min_vloss:
-            self.min_vloss = vloss
+        if self.vloss_min is None or vloss < self.vloss_min:
+            self.vloss_min = vloss
             self.tloss = tloss
             self.tpearson = tpearson
             self.vpearson = vpearson
 
         assert self.tloss is not None
-        assert self.min_vloss is not None
+        assert self.vloss_min is not None
         assert self.tpearson is not None
         assert self.vpearson is not None
         log = partial(pl_module.log, on_step=False, on_epoch=True)
         # Log on each epoch end to keep the plots clear, instead of logging only
         # when there is a new best value.
-        log("hp/min_vloss", self.min_vloss, prog_bar=True)
+        log("hp/vloss_min", self.vloss_min, prog_bar=True)
         log("hp/tloss", self.tloss, prog_bar=False)
         log("hp/tpearson", self.tpearson, prog_bar=False)
         log("hp/vpearson", self.vpearson, prog_bar=False)

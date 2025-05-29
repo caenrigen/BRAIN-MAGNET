@@ -81,7 +81,7 @@ learning_rate = 0.01
 
 # Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
 # the data. Each time the data used for validation is different.
-folds = None
+folds = 5
 
 folds_list = range(folds) if folds else []
 frac_val = 0.0  # only relevant if not using folds
@@ -94,11 +94,6 @@ frac_test = 0.10
 def train(version: str, fold: int, batch_size: int):
     # We did not use workers, but we keep it here for future reference and reminder.
     L.seed_everything(random_state, workers=True)  # for reproducibility
-
-    if frac_val and folds:
-        raise ValueError(
-            "frac_val does not apply for folds. Set frac_val=0 if you are using folds."
-        )
 
     model = cnn.BrainMagnetCNN(
         learning_rate=learning_rate,
@@ -138,7 +133,6 @@ def train(version: str, fold: int, batch_size: int):
         name=task,
         version=version,
         sub_dir=f"fold_{fold}",
-        default_hp_metric=True,
     )
     trainer = L.Trainer(
         accelerator="mps",
