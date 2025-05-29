@@ -110,6 +110,13 @@ class DataModule(L.LightningDataModule):
 
         if folds is not None and fold >= folds:
             raise ValueError(f"{fold = } must be less than {folds = }")
+        if frac_val and folds:
+            # To ensure there is no confusion about how the folds work
+            raise ValueError(
+                "frac_val does not apply for folds. "
+                "Set frac_val=0 if you are using folds (or set folds=None)."
+            )
+
         self.folds = folds or None  # 0 is equivalent to no folds
         self.fold = fold
         self.frac_test = frac_test
