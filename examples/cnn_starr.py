@@ -182,17 +182,16 @@ class EpochCheckpoint(L.Callback):
             # This allows to plot both losses in the same chart under the
             # "CUSTOM SCALARS" tab of TensorBoard.
             # This is the most neat way to do it.
+            # Structure: {category0: {title0: ["Multiline", tags0]}}
+            layout = {
+                "main": {
+                    "loss": ["Multiline", ["loss/train", "loss/val"]],
+                    "pearson": ["Multiline", ["pearson/train", "pearson/val"]],
+                }
+            }
             # ! Must be called only once.
-            writer.add_custom_scalars_multilinechart(
-                ["loss/train", "loss/val"],
-                category="main",
-                title="losses",
-            )
-            writer.add_custom_scalars_multilinechart(
-                ["pearson/train", "pearson/val"],
-                category="main",
-                title="pearson",
-            )
+            # ! Does not work to call it several times to add several layouts.
+            writer.add_custom_scalars(layout)
 
         if self.vloss_min is None or vloss < self.vloss_min:
             self.vloss_min = vloss

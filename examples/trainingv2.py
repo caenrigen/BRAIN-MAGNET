@@ -87,7 +87,7 @@ folds_list = range(folds) if folds else []
 frac_val = 0.0  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
-# 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
+# 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
 frac_test = 0.10
 
 
@@ -110,6 +110,7 @@ def train(version: str, fold: int, batch_size: int):
         samples=len(targets),
         max_ep=max_epochs,
     )
+    # TODO lightning style
     model.to(device)
 
     data_loader = dm.DataModule(
@@ -133,6 +134,8 @@ def train(version: str, fold: int, batch_size: int):
         name=task,
         version=version,
         sub_dir=f"fold_{fold}",
+        # avoid inserting a dummy metric with an initial value
+        default_hp_metric=False,
     )
     trainer = L.Trainer(
         accelerator="mps",
