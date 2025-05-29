@@ -16,16 +16,16 @@
 # %%
 from pathlib import Path
 import gc
-from random import randbytes
+from numpy.random import default_rng
 from tqdm.auto import tqdm
 import pandas as pd
+import time
 
 import torch
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
 
 # %%
-random_state = 913
 dbm = Path("/Volumes/Famafia/brain-magnet")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
@@ -51,9 +51,6 @@ targets = pd.read_csv(fp, usecols=[y_col])[y_col].to_numpy()
 targets.shape
 
 # %%
-# fp_npy_1hot_seqs = dbmrd / "seqs(5000,4,1000).npy"
-# targets = targets[:5000]
-
 fp_npy_1hot_seqs = dbmrd / "seqs(148114,4,1000).npy"
 assert fp_npy_1hot_seqs.exists()
 fp_npy_1hot_seqs_rev_comp = dbmrd / "seqs_rev_comp(148114,4,1000).npy"
@@ -61,28 +58,42 @@ assert fp_npy_1hot_seqs_rev_comp.exists()
 
 
 # %%
-gc.collect()
-torch.mps.empty_cache()
-
-# %%
-version = randbytes(4).hex()
+# Generate a random version string for this trianing run, it is used to name the
+# folder where the results of the training are saved.
+# Here we actually want it to be always random.
+rng_version = default_rng(int(time.time()))
+version = rng_version.random(1).tobytes()[:4].hex()
 print(f"{version = }")
+
+random_state = 20250529  # for reproducibility
+
+# We train for a fixed number of epochs and post select the best model(s)
+max_epochs = 10
 
 batch_size = 256
 learning_rate = 0.01
 
-folds = 5
-folds_list = range(folds) if folds else []
-frac_val = 0.10  # only relevant if not using folds
+# Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
+# the data. Each time the data used for validation is different.
+folds = None
 
-max_epochs = 30
+folds_list = range(folds) if folds else []
+frac_val = 0.20  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
-frac_test = 0.00
+frac_test = 0.90
 
 
 def train(version: str, fold: int, batch_size: int):
+    # For reproducibility
+    L.seed_everything(random_state, workers=True)
+
+    if frac_val and folds:
+        raise ValueError(
+            "frac_val does not apply for folds. Set frac_val=0 if you are using folds."
+        )
+
     model = cnn.BrainMagnetCNN(
         learning_rate=learning_rate,
         # Don't change this for training, reverse complement is handled by the data
@@ -103,6 +114,7 @@ def train(version: str, fold: int, batch_size: int):
     data_loader = dm.DataModule(
         fp_npy_1hot_seqs=fp_npy_1hot_seqs,
         fp_npy_1hot_seqs_rev_comp=fp_npy_1hot_seqs_rev_comp,
+        random_state=random_state,
         targets=targets,
         folds=folds or None,
         fold=fold,
@@ -127,6 +139,7 @@ def train(version: str, fold: int, batch_size: int):
         max_epochs=max_epochs,
         logger=logger,
         callbacks=[cnn.EpochCheckpoint()],
+        deterministic=True,  # for reproducibility
     )
 
     try:
@@ -143,6 +156,11 @@ def train(version: str, fold: int, batch_size: int):
 
     return True
 
+
+# Free up memory
+gc.collect()
+if device.type == "mps":
+    torch.mps.empty_cache()
 
 if folds:
     for fold in tqdm(folds_list, desc="Folds"):
