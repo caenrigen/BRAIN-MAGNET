@@ -65,10 +65,16 @@ rng_version = default_rng(int(time.time()))
 version = rng_version.random(1).tobytes()[:4].hex()
 print(f"{version = }")
 
-random_state = 20250529  # for reproducibility
+# The training should result in exactly the same models using the same seed,
+# same data loading and processing order, same model, same hyperparameters, same
+# software packages and same hardware.
+# Nontheless, be aware that even if you keep everything the same but the hardware
+# is different you might get slightly different results. On the same machine results
+# should be exactly the same.
+random_state = 20240413  # for reproducibility
 
 # We train for a fixed number of epochs and post select the best model(s)
-max_epochs = 10
+max_epochs = 30
 
 batch_size = 256
 learning_rate = 0.01
@@ -78,16 +84,16 @@ learning_rate = 0.01
 folds = None
 
 folds_list = range(folds) if folds else []
-frac_val = 0.20  # only relevant if not using folds
+frac_val = 0.0  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick test training.
-frac_test = 0.90
+frac_test = 0.10
 
 
 def train(version: str, fold: int, batch_size: int):
-    # For reproducibility
-    L.seed_everything(random_state, workers=True)
+    # We did not use workers, but we keep it here for future reference and reminder.
+    L.seed_everything(random_state, workers=True)  # for reproducibility
 
     if frac_val and folds:
         raise ValueError(

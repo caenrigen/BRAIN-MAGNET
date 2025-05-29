@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Literal, Optional
 
+import numpy as np
 import lightning as L
 import torch
 from torch import nn
@@ -9,6 +10,7 @@ from sklearn.metrics import mean_squared_error
 from scipy import stats
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
+from tqdm.auto import tqdm
 
 
 class BrainMagnetCNN(L.LightningModule):
@@ -41,10 +43,10 @@ class BrainMagnetCNN(L.LightningModule):
         self.prev_epoch: Optional[int] = None
         self.losses: List[float] = []
 
-        # ! Avoid Layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
+        # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
         # ! downstream SHAP analysis, i.e. motif discovery.
-        # ! Such layers are tricky to deal with for the SHAP analysis, even if solutions
-        # ! exist, there might caveats and performance issues.
+        # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
+        # ! exist for such layers, there might caveats and performance issues.
         self.model = nn.Sequential(
             nn.Conv1d(4, 16, kernel_size=15, padding="same"),
             nn.BatchNorm1d(16),
@@ -105,7 +107,6 @@ class BrainMagnetCNN(L.LightningModule):
 
         # Log the training loss (this shows up in TensorBoard)
         self.log(
-            # This var is used by the EarlyStopping
             f"loss/{suffix}",
             loss_log,
             on_step=False,
@@ -219,19 +220,26 @@ def load_model(
     **kwargs_model,
 ):
     model = BrainMagnetCNN(**kwargs_model)
-    model.to(device)
     model.load_state_dict(torch.load(fp))
     model.to(device)
     return model
 
 
-def eval_model(model: BrainMagnetCNN, dataloader: DataLoader, device):
+def eval_model(
+    model: BrainMagnetCNN,
+    dataloader: DataLoader,
+    device: torch.device,
+    use_tqdm: bool = True,
+):
     preds = []
     targets = []
 
     model.eval()
     with torch.no_grad():
-        for _batch, data in enumerate(dataloader):
+        it = enumerate(dataloader)
+        if use_tqdm:
+            it = tqdm(it, total=len(dataloader))
+        for _batch, data in it:
             inputs_, targets_ = data
             inputs_ = inputs_.to(device)
             targets_ = targets_.to(device)
@@ -244,7 +252,7 @@ def eval_model(model: BrainMagnetCNN, dataloader: DataLoader, device):
     return targets, preds
 
 
-def model_stats(targets, preds):
+def model_stats(targets: np.ndarray, preds: np.ndarray):
     mse = mean_squared_error(targets, preds)
     pearson = float(stats.pearsonr(targets, preds).statistic)
     spearman = float(stats.spearmanr(targets, preds).statistic)
