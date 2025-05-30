@@ -1,12 +1,9 @@
 from functools import partial
-from typing import Literal, Optional
+from typing import Literal, Optional, Union, Tuple
 
-import numpy as np
 import torch
 from torch import nn
 import lightning as L
-from sklearn.metrics import mean_squared_error
-from scipy import stats
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
@@ -15,7 +12,7 @@ class BrainMagnetCNN(L.LightningModule):
     def __init__(
         self,
         learning_rate: float = 0.01,
-        weight_decay: float = 0.0,
+        weight_decay: float = 0.0,  # e.g. 1e-6
         forward_mode: Literal["forward", "reverse_complement", "mean"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
         **hyper_params,
@@ -93,7 +90,7 @@ class BrainMagnetCNN(L.LightningModule):
 
         # Scalar tensors
         loss: torch.Tensor = self.loss_fn(out, targets)
-        pearson: torch.Tensor = pearson_correlation(out, targets, self.cos_sim)
+        pearson: torch.Tensor = pearson_correlation_estimate(out, targets, self.cos_sim)
 
         # Skip logging if `lightning` is in sanity checking mode.
         if self.trainer.sanity_checking:
@@ -111,14 +108,31 @@ class BrainMagnetCNN(L.LightningModule):
 
         return loss
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx: int):
         return self._step(batch, batch_idx, suffix="train")
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx: int):
         return self._step(batch, batch_idx, suffix="val")
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, batch_idx: int):
         return self._step(batch, batch_idx, suffix="test")
+
+    def predict_step(
+        self,
+        batch: Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor],
+        batch_idx: int,
+    ):
+        """
+        This method is required to implement otherwise predict() will not work directly
+        with the batches output by our training dataloaders since our batches contain
+        both the inputs and the targets.
+        """
+        # Support both (inputs, targets) and simply inputs
+        if isinstance(batch, tuple):
+            inputs, targets = batch
+            return self(inputs), targets
+        else:
+            return self(batch)
 
     def configure_optimizers(self):
         # Using AdamW which is supposed to deal more correctly with weight decay,
@@ -203,13 +217,6 @@ class LogMetrics(L.Callback):
         log("hp/vpearson", self.vpearson, prog_bar=False)
 
 
-def model_stats(targets: np.ndarray, preds: np.ndarray):
-    mse = mean_squared_error(targets, preds)
-    pearson = float(stats.pearsonr(targets, preds).statistic)
-    spearman = float(stats.spearmanr(targets, preds).statistic)
-    return mse, pearson, spearman
-
-
-def pearson_correlation(predictions, targets, cos_sim: nn.CosineSimilarity):
+def pearson_correlation_estimate(predictions, targets, cos_sim: nn.CosineSimilarity):
     """Estimate Pearson correlation using cosine similarity."""
     return cos_sim(predictions - predictions.mean(), targets - targets.mean())

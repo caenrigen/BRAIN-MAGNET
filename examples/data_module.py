@@ -9,7 +9,6 @@ from typing import Callable, List, Optional, Tuple, Union, Literal
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
-import seaborn as sns
 
 import utils as ut
 
@@ -74,6 +73,10 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
 
     # add one dimension in targets: [batch] -> [batch, 1]
     return seqs_tensor, targets_tensor.unsqueeze(1)
+
+
+def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
+    return np.stack([data, data_rev]).T.flatten()
 
 
 class DataModule(L.LightningDataModule):
@@ -172,7 +175,7 @@ class DataModule(L.LightningDataModule):
             # concatenating them. Might help to learn faster.
             # return np.concatenate([indices, indices + len(self.targets)])
             assert self.targets is not None
-            return np.stack([indices, indices + len(self.targets)]).T.flatten()
+            return interleave_with_rev_comp(indices, indices + len(self.targets))
         return indices
 
     def prepare_data(self):
@@ -326,70 +329,75 @@ class DataModule(L.LightningDataModule):
         assert self.indices_test is not None
         return self.DataLoader(self.dataset, sampler=self.indices_test)
 
-
-def list_fold_checkpoints(dp_train: Path, version: str, task: str):
-    fps = []
-    dp = dp_train / f"starr_{task}" / version
-    for dp in dp.glob(r"fold_*"):
-        dp /= "epoch_checkpoints"
-        fps += list(dp.glob(rf"{task}*.pt"))
-    return fps
+    def predict_dataloader(self):
+        return self.test_dataloader()
 
 
-def checkpoint_fps_to_df(fps):
-    data = []
-    for fp in fps:
-        fn = fp.name
-        fold = int(fp.parent.parent.name.split("fold_")[1].split("_")[0])
-        # Extract val_loss and epoch from filename (format:
-        # {task}_ep{epoch}_vloss{val_loss}_tloss{train_loss}.pt)
-        epoch_str = fn.split("ep")[1].split("_")[0]
-        epoch = int(epoch_str)
-        val_loss_str = fn.split("vloss")[1].split("_")[0]
-        val_loss = float(val_loss_str) / 1000  # Convert from integer representation
-        train_loss_str = fn.split("tloss")[1].split(".")[0]
-        train_loss = float(train_loss_str) / 1000  # Convert from integer representation
-        data.append(
-            {
-                "fp": fp,
-                "fn": fn,
-                "fold": fold,
-                "val_loss": val_loss,
-                "train_loss": train_loss,
-                "epoch": epoch,
-            }
-        )
-    df = pd.DataFrame(data)
-    df.sort_values(by=["fold", "epoch"], inplace=True)
-    df.reset_index(drop=True, inplace=True)
+def extract_fold(fp: Path):
+    parts = fp.parent.parent.name.split("_f")
+    if len(parts) == 2:
+        version, fold = parts
+    else:
+        version, fold = parts[0], None
+    return version, fold
+
+
+def extract_epoch(fp: Path):
+    # name = "epoch000.ckpt"
+    return int(fp.name.split(".")[0].split("=")[-1])
+
+
+def list_checkpoints(
+    dp_train: Path, task: str, version: str = "", read_tb: bool = True
+):
+    dp = dp_train / task
+    dps_folds = list(fp for fp in dp.glob(f"{version}*") if fp.is_dir())
+    rows = []
+    for dp in dps_folds:
+        dp = dp / "checkpoints"
+        rows += list(dp.glob("*.ckpt"))
+
+    s_fps = pd.Series(rows)
+    s_fps.name = "fp"
+    df = s_fps.to_frame()
+
+    df["version"], df["fold"] = zip(*df.fp.map(extract_fold))  # type: ignore
+    df["fold"] = df["fold"].astype(int)
+    df["epoch"] = df.fp.map(extract_epoch)
+    df.sort_values(["fold", "epoch"], inplace=True)
+
+    if not read_tb:
+        return df
+
+    dfs = []
+    for _, df_v in df.groupby("version"):
+        for _, df_f in df_v.groupby("fold"):
+            fp_tb = list(df_f.fp.iloc[0].parent.parent.glob("events.out.tfevents.*"))[0]
+            df_tb = ut.read_tensorboard_log(fp_tb)  # comes sorted by step
+            for col in df_tb.columns:
+                df_f[col] = df_tb[col].values
+            dfs.append(df_f)
+
+    df = pd.concat(dfs)
     return df
 
 
-def pick_checkpoint(df, fold: int, tolerance: float = 0.10, ax=None):
-    df = df[df.fold == fold]
+def pick_checkpoint(
+    df: pd.DataFrame, col_train: str = "loss_train", col_val: str = "loss_val", ax=None
+):
+    df = df.copy()
     df.set_index("epoch", inplace=True)
     df.sort_index(inplace=True)
-    min_, max_ = df.mse.min(), df.mse.max()
     if ax:
-        sns.lineplot(data=df, x="epoch", y="mse", hue="set_name", marker="o", ax=ax)
+        cols = [col_train, col_val]
+        min_, max_ = min(df[cols].min()), max(df[cols].max())
+        df.plot(y=cols, marker=".", ax=ax)
 
-    df = df.pivot(columns="set_name", values="mse")
-    df["diff_train_val"] = (df.train - df.val).abs()
-    df["stop"] = (df.train < df.val) & (df.diff_train_val <= tolerance * df.val)
-    df = df[df.stop]
-    df.sort_values(by=["val", "diff_train_val"], inplace=True)
-    epoch = df.index.values[0]
+    m = df[col_train] < df[col_val]
+    # Choose the lowest validation loss
+    epoch = df[m].sort_values(by="loss_val").index.values[0]
+
     if ax:
         ax.vlines(epoch, min_, max_, color="red", linestyle="--")
+
     return int(epoch)
-
-
-def pick_best_checkpoint(dp_train: Path, version: str, task: str, fold: int):
-    fp = dp_train / f"starr_{task}" / version / "stats.pkl.bz2"
-    df_models = pd.read_pickle(fp)
-    epoch = pick_checkpoint(df_models, fold=fold)
-    dp_checkpoints = (
-        dp_train / f"starr_{task}" / version / f"fold_{fold}" / "epoch_checkpoints"
-    )
-    fp_model_checkpoint = list(dp_checkpoints.glob(f"{task}_ep{epoch:02d}*.pt"))[0]
-    return fp_model_checkpoint

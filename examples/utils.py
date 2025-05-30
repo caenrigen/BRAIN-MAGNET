@@ -1,13 +1,18 @@
+from pathlib import Path
 from typing import Optional, Sequence
 from functools import partial
 import time
 
+import pandas as pd
 import torch
 import numpy as np
 from numpy.random import default_rng
+from sklearn.metrics import mean_squared_error
+from scipy import stats
+from tensorboard.backend.event_processing import event_accumulator
 
 
-def free_memory(device: torch.device):
+def empty_cache(device: torch.device):
     if device.type == "mps":
         torch.mps.empty_cache()
     elif device.type == "cuda":
@@ -122,3 +127,36 @@ def sequences_1hot_to_reverse_complement(
     """Reverse complement numpy one-hot encoded sequences"""
     func = partial(one_hot_reverse_complement, is_transposed=is_transposed)
     return np.stack(list(map(func, sequences_1hot)), axis=0)
+
+
+def read_tensorboard_log(
+    fp: Path,
+    scalars: Sequence[str] = ("loss/train", "loss/val", "pearson/train", "pearson/val"),
+):
+    """returns a dictionary of pandas dataframes for each requested scalar"""
+    assert fp.exists(), fp
+    size_guidance = {event_accumulator.SCALARS: 0}
+    ea = event_accumulator.EventAccumulator(str(fp), size_guidance=size_guidance)
+    ea.Reload()  # load events from file
+    assert all(s in ea.Tags()["scalars"] for s in scalars)
+    dfs = []
+    for s in scalars:
+        df = pd.DataFrame(ea.Scalars(s))
+        df["scalar"] = s
+        dfs.append(df)
+    df = pd.concat(dfs)
+    df["scalar"] = df.scalar.str.replace("/", "_")
+    df.set_index(["scalar", "step"], inplace=True)
+    df = df.unstack(level="scalar").value  # there is also .wall_time
+    df.reset_index(level="step", inplace=True)
+    df.set_index("step", drop=True, inplace=True)
+    df.sort_index(inplace=True, ascending=True)
+    df.columns.name = None
+    return df
+
+
+def model_stats(targets: np.ndarray, preds: np.ndarray):
+    mse = mean_squared_error(targets, preds)
+    pearson = float(stats.pearsonr(targets, preds).statistic)  # type: ignore
+    spearman = float(stats.spearmanr(targets, preds).statistic)  # type: ignore
+    return mse, pearson, spearman

@@ -5,6 +5,8 @@ import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import logging
+import pandas as pd
+import matplotlib.pyplot as plt
 
 import cnn_starr as cnn
 import data_module as dm
@@ -27,13 +29,15 @@ def train(
     random_state: int,
     device: torch.device,
     version: Optional[str] = None,
+    empty_cache: bool = True,
+    weight_decay: float = 0.0,
 ):
-    ut.free_memory(device)
+    if empty_cache:
+        ut.empty_cache(device)
     # We did not use workers, but we keep it here for future reference and reminder.
     L.seed_everything(random_state, workers=True)  # for reproducibility
 
     model = cnn.BrainMagnetCNN(
-        y_col=f"{task}_log2_enrichment",
         learning_rate=learning_rate,
         # Don't change this for training, reverse complement is handled by the data
         # module as augmentation data.
@@ -46,6 +50,7 @@ def train(
         folds=folds,
         fold=fold,
         max_ep=max_epochs,
+        weight_decay=weight_decay,
     )
     # print(model)
 
@@ -62,9 +67,9 @@ def train(
         filename="{epoch:03d}",
         every_n_epochs=1,
         save_top_k=-1,
-        # Set it to True if you intend to, e.g., be able to resume training from a
+        # Set it to `False` if you intend to, e.g., be able to resume training from a
         # checkpoint and need things like optimizer state, etc. to be saved.
-        save_weights_only=False,
+        save_weights_only=True,
     )
     trainer = L.Trainer(
         accelerator=device.type,
@@ -96,6 +101,28 @@ def train(
 
     # Free up memory
     model.cpu()
-    ut.free_memory(device)
+    if empty_cache:
+        ut.empty_cache(device)
 
     return True
+
+
+def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
+    best_checkpoints = {}
+    if plot:
+        fig, axs = plt.subplots(1, 5, figsize=(15, 3), sharex=True, sharey=True)
+    for fold in range(5):
+        df = df_ckpts[df_ckpts.fold == fold].copy()
+        best_epoch = dm.pick_checkpoint(df, ax=axs[fold] if plot else None)
+        df_best = df[df.epoch == best_epoch]
+        assert len(df_best) == 1
+        best_checkpoints[fold] = df_best.fp.iloc[0]
+        if plot:
+            max_ = df_ckpts.loss_val.quantile(0.95)  # don't plot outliers
+            min_ = df_ckpts.loss_train.min()
+            axs[fold].set_ylim(min_ - (max_ - min_) * 0.05, max_)
+
+    if plot:
+        fig.tight_layout()
+
+    return best_checkpoints, fig, axs
