@@ -1,14 +1,19 @@
+import logging
 import lightning as L
 import torch
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union, Literal
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 import seaborn as sns
+
+import utils as ut
+
+logger = logging.getLogger(__name__)
 
 
 def bins(s, n: int = 8):
@@ -74,9 +79,11 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
 class DataModule(L.LightningDataModule):
     def __init__(
         self,
-        targets: np.ndarray,
-        fp_npy_1hot_seqs: Path,
-        fp_npy_1hot_seqs_rev_comp: Optional[Path] = None,
+        fp_dataset: Union[Path, str],
+        x_col: str = "Seq",
+        targets_col: str = "ESC_log2_enrichment",
+        fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
+        fp_npy_1hot_seqs_rev_comp: Optional[Union[Path, str]] = None,
         random_state: int = 913,
         folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to folds-1)
@@ -84,6 +91,7 @@ class DataModule(L.LightningDataModule):
         frac_val: float = 0.10,
         validate_split: bool = True,
         bins_func: Callable = bins_log2,
+        padding: int = 1000,
         # DataLoader kwargs:
         batch_size: int = 128,
         # On macOS with MPS (Apple Silicon) using multiprocessing did not give any speed up.
@@ -98,16 +106,6 @@ class DataModule(L.LightningDataModule):
         **dataloader_kwargs,
     ):
         super().__init__()
-        self.fp_npy_1hot_seqs = fp_npy_1hot_seqs
-        self.targets = targets
-
-        self.indices_train: Optional[np.ndarray] = None
-        self.indices_test: Optional[np.ndarray] = None
-        self.indices_val: Optional[np.ndarray] = None
-
-        self.random_state = random_state
-        self.dataloader_kwargs = dataloader_kwargs
-
         if folds is not None and fold >= folds:
             raise ValueError(f"{fold = } must be less than {folds = }")
         if frac_val and folds:
@@ -117,39 +115,54 @@ class DataModule(L.LightningDataModule):
                 "Set frac_val=0 if you are using folds (or set folds=None)."
             )
 
+        self.fp_dataset = Path(fp_dataset)
+        if not self.fp_dataset.is_file():
+            raise FileNotFoundError(self.fp_dataset)
+
+        if fp_npy_1hot_seqs:
+            self.fp_npy_1hot_seqs = Path(fp_npy_1hot_seqs)
+            if not self.fp_npy_1hot_seqs.is_file():
+                raise FileNotFoundError(self.fp_npy_1hot_seqs)
+        else:
+            self.fp_npy_1hot_seqs: Optional[Path] = None
+            self.fp_npy_1hot_seqs = self.fp_dataset.parent / "seqs.npy"
+
+        if fp_npy_1hot_seqs_rev_comp:
+            self.fp_npy_1hot_seqs_rev_comp = Path(fp_npy_1hot_seqs_rev_comp)
+            if not self.fp_npy_1hot_seqs_rev_comp.is_file():
+                raise FileNotFoundError(self.fp_npy_1hot_seqs_rev_comp)
+        else:
+            self.fp_npy_1hot_seqs_rev_comp = self.fp_dataset.parent / "seqs_rev.npy"
+
+        self.x_col = x_col
+        self.targets_col = targets_col
+        self.random_state = random_state
         self.folds = folds or None  # 0 is equivalent to no folds
         self.fold = fold
         self.frac_test = frac_test
         self.frac_val = frac_val
         self.bins_func = bins_func
+        self.padding = padding
         self.validate_split = validate_split
-        self.dataset_fwd = MemMapDataset(
-            fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
-            targets=self.targets,
-        )
 
-        if fp_npy_1hot_seqs_rev_comp:
-            self.dataset_rev = MemMapDataset(
-                fp_npy_1hot_seqs=fp_npy_1hot_seqs_rev_comp,
-                targets=self.targets,
-            )
-            self.dataset = ConcatDataset([self.dataset_fwd, self.dataset_rev])
-        else:
-            self.dataset_rev = None
-            self.dataset = self.dataset_fwd
+        self.targets: Optional[np.ndarray] = None
+        self.indices_train: Optional[np.ndarray] = None
+        self.indices_test: Optional[np.ndarray] = None
+        self.indices_val: Optional[np.ndarray] = None
 
         if persistent_workers is None:
             persistent_workers = num_workers > 0
 
+        # A convenience wrapper for instantiating DataLoader
         self.DataLoader = partial(
             DataLoader,
-            shuffle=False,  # we already shuffle the indices
+            shuffle=False,  # we already shuffle the indices when splitting data
             collate_fn=collate,
             num_workers=num_workers,
             multiprocessing_context=multiprocessing_context,
             persistent_workers=persistent_workers,
             batch_size=batch_size,
-            **self.dataloader_kwargs,
+            **dataloader_kwargs,
         )
 
     def concat_rev(self, indices):
@@ -158,10 +171,73 @@ class DataModule(L.LightningDataModule):
             # Interleave forward and reverse complement indices, instead of simply
             # concatenating them. Might help to learn faster.
             # return np.concatenate([indices, indices + len(self.targets)])
+            assert self.targets is not None
             return np.stack([indices, indices + len(self.targets)]).T.flatten()
         return indices
 
     def prepare_data(self):
+        """
+        For "one time actions" before any training experiments.
+        This is where you typically download the dataset.
+        ! Do not make state assignments here (e.g. self.indices_train = ..., etc.),
+        ! use `setup()` instead
+        """
+
+        assert self.fp_npy_1hot_seqs is not None
+        assert self.fp_npy_1hot_seqs_rev_comp is not None
+
+        if self.fp_npy_1hot_seqs.exists() and self.fp_npy_1hot_seqs_rev_comp.exists():
+            return
+
+        seqs_str = pd.read_csv(self.fp_dataset, usecols=[self.x_col])[self.x_col]
+        if self.fp_npy_1hot_seqs.exists() and self.fp_npy_1hot_seqs_rev_comp.exists():
+            logger.info(
+                f"Using precomputed one-hot encoded sequences: "
+                f"{self.fp_npy_1hot_seqs} and {self.fp_npy_1hot_seqs_rev_comp}"
+            )
+            return
+
+        seqs_1hot = ut.sequences_str_to_1hot(
+            seqs_str,  # type: ignore
+            pad_to=self.padding,
+            transpose=True,
+        )
+        if not self.fp_npy_1hot_seqs.exists():
+            logger.info(f"Saving one-hot encoded sequences: {self.fp_npy_1hot_seqs}")
+            np.save(self.fp_npy_1hot_seqs, seqs_1hot)
+
+        if not self.fp_npy_1hot_seqs_rev_comp.exists():
+            seqs_1hot_rev_comp = ut.sequences_1hot_to_reverse_complement(
+                seqs_1hot,  # type: ignore
+                is_transposed=True,
+            )
+            logger.info(
+                f"Saving reverse-complement one-hot encoded sequences: "
+                f"{self.fp_npy_1hot_seqs_rev_comp}"
+            )
+            np.save(self.fp_npy_1hot_seqs_rev_comp, seqs_1hot_rev_comp)
+
+    def setup(self, stage: Literal["fit", "test", None] = None):
+        """It is safe to make state assignments here"""
+
+        df = pd.read_csv(self.fp_dataset, usecols=[self.targets_col])
+        self.targets = df[self.targets_col].to_numpy()
+
+        assert self.fp_npy_1hot_seqs is not None
+        self.dataset_fwd = MemMapDataset(
+            fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
+            targets=self.targets,
+        )
+        if self.fp_npy_1hot_seqs_rev_comp:
+            self.dataset_rev = MemMapDataset(
+                fp_npy_1hot_seqs=self.fp_npy_1hot_seqs_rev_comp,
+                targets=self.targets,
+            )
+            self.dataset = ConcatDataset([self.dataset_fwd, self.dataset_rev])
+        else:
+            self.dataset_rev = None
+            self.dataset = self.dataset_fwd
+
         indices_train_val = np.arange(len(self.targets))
         if self.frac_test:
             # Put aside a fraction of the data for a final testing
@@ -174,8 +250,10 @@ class DataModule(L.LightningDataModule):
             )
             self.indices_test = self.concat_rev(self.indices_test)
 
-        # Make a train/val split, simple or k-folds for cross-validation
+        if stage == "test":
+            return  # the rest of the code is not needed for test stage
 
+        # Make a train/val split, simple or k-folds for cross-validation
         if self.folds is not None:
             kf = StratifiedKFold(
                 n_splits=self.folds,
@@ -225,6 +303,7 @@ class DataModule(L.LightningDataModule):
             num_samples += len(self.indices_test)
             unique_samples |= set_test
 
+        assert self.targets is not None
         len_targets = len(self.targets)
         if self.dataset_rev:
             len_targets *= 2
@@ -234,9 +313,6 @@ class DataModule(L.LightningDataModule):
         assert len(unique_samples) == len_targets, (
             f"{len(unique_samples) = } != {len_targets = }"
         )
-
-    def setup(self, stage: Optional[str] = None):
-        pass
 
     def train_dataloader(self):
         assert self.indices_train is not None

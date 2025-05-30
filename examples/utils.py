@@ -1,6 +1,31 @@
-import numpy as np
+from typing import Optional, Sequence
+from functools import partial
+import time
+
 import torch
-from typing import Optional
+import numpy as np
+from numpy.random import default_rng
+
+
+def free_memory(device: torch.device):
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    elif device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def make_version(fold: Optional[int] = None, version: Optional[str] = None):
+    """
+    Generate a random version string for this training run, it is used to name the
+    folder where the results of the training are saved.
+    """
+    rng_version = default_rng(int(time.time()))
+    if version is None:
+        version = rng_version.random(1).tobytes()[:4].hex()
+    if fold is not None:
+        return f"{version}_f{fold}"
+    else:
+        return version
 
 
 def to_uint8(seq: str):
@@ -26,9 +51,7 @@ HASH_TABLE = make_one_hot_encode()
 
 
 def one_hot_encode(
-    sequence: str,
-    pad_to: Optional[int] = None,
-    transpose: bool = False,
+    sequence: str, pad_to: Optional[int] = None, transpose: bool = False
 ):
     one_hot = HASH_TABLE[to_uint8(sequence)]
     if pad_to is not None:
@@ -78,3 +101,24 @@ def tensor_reverse_complement(x: torch.Tensor):
     channel_map = [3, 2, 1, 0]  # T, G, C, A
     x_revcomp = x_rev[:, channel_map, :]
     return x_revcomp
+
+
+def sequences_str_to_1hot(
+    sequences: Sequence[str],
+    pad_to: int = 1000,
+    transpose: bool = True,
+):
+    """Transpose to match how pytorch organizes data: (batch_size, channels=4, num_bp)"""
+    func = partial(one_hot_encode, pad_to=pad_to, transpose=transpose)
+    seqs_1hot = list(map(func, sequences))
+    # Return the seqs_1hot so that we can use it for reverse complement
+    return np.stack(seqs_1hot, axis=0)
+
+
+def sequences_1hot_to_reverse_complement(
+    sequences_1hot: Sequence[np.ndarray],
+    is_transposed: bool = True,
+):
+    """Reverse complement numpy one-hot encoded sequences"""
+    func = partial(one_hot_reverse_complement, is_transposed=is_transposed)
+    return np.stack(list(map(func, sequences_1hot)), axis=0)
