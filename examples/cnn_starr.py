@@ -1,17 +1,15 @@
 from functools import partial
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 import numpy as np
-import lightning as L
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+import lightning as L
 from sklearn.metrics import mean_squared_error
 from scipy import stats
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
-from tqdm.auto import tqdm
 
 
 class BrainMagnetCNN(L.LightningModule):
@@ -19,14 +17,14 @@ class BrainMagnetCNN(L.LightningModule):
         self,
         learning_rate: float = 0.01,
         weight_decay: float = 0.0,
-        forward_mode: Literal["forward", "reverse_complement", "average"] = "forward",
+        forward_mode: Literal["forward", "reverse_complement", "mean"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
         **hyper_params,
     ):
         super().__init__()
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        if forward_mode not in {"forward", "reverse_complement", "average"}:
+        if forward_mode not in {"forward", "reverse_complement", "mean"}:
             raise ValueError(f"{forward_mode = }")
         self.forward_mode = forward_mode
 
@@ -34,7 +32,8 @@ class BrainMagnetCNN(L.LightningModule):
         hyper_params["lr"] = learning_rate
         hyper_params["wd"] = weight_decay
         hyper_params["fm"] = forward_mode
-        # Save hyperparameters for logging purposes.
+        # Save hyperparameters for logging in TensorBoard.
+        # The hyperparameters are saved to the “hyper_parameters” key in the checkpoint
         # Calling this method seems to work only from the __init__ method.
         # logger=False is used to avoid logging an initial `hp_metric=-1`.
         self.save_hyperparameters(hyper_params, logger=False)
@@ -82,7 +81,7 @@ class BrainMagnetCNN(L.LightningModule):
             return self.model(x)
         elif self.forward_mode == "reverse_complement":
             return self.model(ut.tensor_reverse_complement(x))
-        elif self.forward_mode == "average":
+        elif self.forward_mode == "mean":
             res_fwd = self.model(x)
             res_rc = self.model(ut.tensor_reverse_complement(x))
             return (res_fwd + res_rc) / 2  # take the average
@@ -91,8 +90,6 @@ class BrainMagnetCNN(L.LightningModule):
 
     def _step(self, batch, batch_idx, suffix: str):
         inputs, targets = batch
-        inputs = inputs.to(self.device)
-        targets = targets.to(self.device)
         out = self(inputs)
 
         # Scalar tensors
@@ -134,24 +131,19 @@ class BrainMagnetCNN(L.LightningModule):
         )
 
 
-class EpochCheckpoint(L.Callback):
+class LogMetrics(L.Callback):
     def __init__(self):
         super().__init__()
         self.vloss_min: Optional[torch.Tensor] = None
-        # Corresponds training loss at the best validation loss.
+        # Corresponds values at the best validation loss.
         self.tloss: Optional[torch.Tensor] = None
+        self.tpearson: Optional[torch.Tensor] = None
+        self.vpearson: Optional[torch.Tensor] = None
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: BrainMagnetCNN):
         """Gets called after validation epoch ends"""
         if trainer.sanity_checking:
             return
-
-        assert trainer.logger is not None and trainer.logger.log_dir is not None
-        checkpoint_dir = Path(trainer.logger.log_dir) / "epoch_checkpoints"
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        fn = f"ep{trainer.current_epoch:03d}.pt"
-        fp = checkpoint_dir / fn
-        torch.save(pl_module.state_dict(), fp)
 
         tloss = trainer.callback_metrics.get("loss/train")
         assert tloss is not None
@@ -210,44 +202,6 @@ class EpochCheckpoint(L.Callback):
         log("hp/tloss", self.tloss, prog_bar=False)
         log("hp/tpearson", self.tpearson, prog_bar=False)
         log("hp/vpearson", self.vpearson, prog_bar=False)
-
-
-def load_model(
-    fp: Path,
-    device: torch.device,
-    **kwargs_model,
-):
-    model = BrainMagnetCNN(**kwargs_model)
-    model.load_state_dict(torch.load(fp))
-    model.to(device)
-    return model
-
-
-def eval_model(
-    model: BrainMagnetCNN,
-    dataloader: DataLoader,
-    device: torch.device,
-    use_tqdm: bool = True,
-):
-    preds = []
-    targets = []
-
-    model.eval()
-    with torch.no_grad():
-        it = enumerate(dataloader)
-        if use_tqdm:
-            it = tqdm(it, total=len(dataloader))
-        for _batch, data in it:
-            inputs_, targets_ = data
-            inputs_ = inputs_.to(device)
-            targets_ = targets_.to(device)
-            outputs = model(inputs_)
-            targets.append(targets_)
-            preds.append(outputs)
-
-    targets = torch.cat(targets, dim=0).cpu().numpy()
-    preds = torch.cat(preds, dim=0).cpu().numpy()
-    return targets, preds
 
 
 def model_stats(targets: np.ndarray, preds: np.ndarray):

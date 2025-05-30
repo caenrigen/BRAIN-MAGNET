@@ -24,6 +24,7 @@ import time
 import torch
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 # %%
 dbm = Path("/Volumes/Famafia/brain-magnet")
@@ -81,14 +82,14 @@ learning_rate = 0.01
 
 # Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
 # the data. Each time the data used for validation is different.
-folds = 5
+folds = None
 
 folds_list = range(folds) if folds else []
-frac_val = 0.0  # only relevant if not using folds
+frac_val = 0.10  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
-frac_test = 0.10
+frac_test = 0.90
 
 
 def train(version: str, fold: int, batch_size: int):
@@ -110,8 +111,6 @@ def train(version: str, fold: int, batch_size: int):
         samples=len(targets),
         max_ep=max_epochs,
     )
-    # TODO lightning style
-    model.to(device)
 
     data_loader = dm.DataModule(
         fp_npy_1hot_seqs=fp_npy_1hot_seqs,
@@ -130,19 +129,27 @@ def train(version: str, fold: int, batch_size: int):
     )
 
     logger = TensorBoardLogger(
-        dbmt,
+        save_dir=dbmt,
         name=task,
-        version=version,
-        sub_dir=f"fold_{fold}",
+        version=f"{version}_f{fold}" if folds else version,
         # avoid inserting a dummy metric with an initial value
         default_hp_metric=False,
     )
+    checkpoints_callback = ModelCheckpoint(
+        filename="{epoch:03d}",
+        every_n_epochs=1,
+        save_top_k=-1,
+        # Set it to True if you intend to, e.g., be able to resume training from a
+        # checkpoint and need things like optimizer state, etc. to be saved.
+        save_weights_only=False,
+    )
     trainer = L.Trainer(
-        accelerator="mps",
+        accelerator=device.type,
         max_epochs=max_epochs,
         logger=logger,
-        callbacks=[cnn.EpochCheckpoint()],
+        callbacks=[cnn.LogMetrics(), checkpoints_callback],
         deterministic=True,  # for reproducibility
+        enable_checkpointing=True,
     )
 
     try:
