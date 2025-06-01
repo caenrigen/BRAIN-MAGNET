@@ -16,13 +16,10 @@
 # %%
 from pathlib import Path
 from functools import partial
-import logging
 from typing import Literal
 
 import torch
 from tqdm.auto import tqdm
-
-# logging.basicConfig(level=logging.INFO)
 
 # %%
 # %load_ext autoreload
@@ -33,6 +30,7 @@ import utils as ut
 import cnn_starr as cnn
 import data_module as dm
 import notebook_helpers as nh
+
 
 # %%
 print(torch.cuda.is_available(), torch.backends.mps.is_available())
@@ -92,6 +90,7 @@ if folds:
         completed = train(fold=fold, version=version)
         if not completed:
             break
+        # break  # if we want to run a single fold only
 else:
     res = train(fold=0)
 

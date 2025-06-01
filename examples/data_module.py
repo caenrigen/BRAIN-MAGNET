@@ -26,10 +26,14 @@ def bins_log2(s, n: int = 8):
     return bins(np.log2(s + 1), n=n)
 
 
+def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
+    return np.stack([data, data_rev]).T.flatten()
+
+
 class MemMapDataset(Dataset):
     def __init__(self, fp_npy_1hot_seqs: Path, targets: np.ndarray):
         self.targets = targets
-        self.seqs_1hot = np.load(fp_npy_1hot_seqs, mmap_mode="r")
+        self.seqs_1hot: np.ndarray = np.load(fp_npy_1hot_seqs, mmap_mode="r")
 
         if len(self.seqs_1hot) != len(self.targets):
             raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
@@ -42,9 +46,7 @@ class MemMapDataset(Dataset):
     def __len__(self):
         return len(self.targets)
 
-    def __getitem__(
-        self, idx: Union[int, slice, np.ndarray, List[int]]
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, idx: Union[int, slice, np.ndarray, List[int]]):
         return self.seqs_1hot[idx], self.targets[idx]
 
 
@@ -75,10 +77,6 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
     return seqs_tensor, targets_tensor.unsqueeze(1)
 
 
-def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
-    return np.stack([data, data_rev]).T.flatten()
-
-
 class DataModule(L.LightningDataModule):
     def __init__(
         self,
@@ -87,7 +85,7 @@ class DataModule(L.LightningDataModule):
         targets_col: str = "ESC_log2_enrichment",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
         fp_npy_1hot_seqs_rev_comp: Optional[Union[Path, str]] = None,
-        random_state: int = 913,
+        random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to folds-1)
         frac_test: float = 0.10,
@@ -256,7 +254,7 @@ class DataModule(L.LightningDataModule):
         if stage == "test":
             return  # the rest of the code is not needed for test stage
 
-        # Make a train/val split, simple or k-folds for cross-validation
+        # Make a train/val split, k-folds for cross-validation or simple split
         if self.folds is not None:
             kf = StratifiedKFold(
                 n_splits=self.folds,

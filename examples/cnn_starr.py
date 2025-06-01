@@ -62,13 +62,14 @@ class BrainMagnetCNN(L.LightningModule):
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),
-            # Did not seem to be needed. The model is already small and the BatchNorm
-            # is already taking care of regularization.
-            # nn.Dropout(0.1),
+            # Dropout layer did not seem to be needed. The model is small and the
+            # BatchNorm1d is applying regularization and our dataset is relatively
+            # large providing significant data variety.
+            # nn.Dropout(1 / 16),
             nn.Linear(16, 16),
             nn.BatchNorm1d(16),
             nn.ReLU(),
-            # nn.Dropout(0.1),
+            # nn.Dropout(1 / 16),
             nn.Linear(16, 1),
         )
 

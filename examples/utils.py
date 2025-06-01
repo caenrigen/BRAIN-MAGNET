@@ -66,7 +66,7 @@ def one_hot_encode(
     return one_hot
 
 
-def pad_one_hot(one_hot: np.ndarray, to: int = 1000):
+def pad_one_hot(one_hot: np.ndarray, to: int):
     """
     You might want to pad to 1024 because certain neural network layers have not been
     implemented for lengths that are not powers of 2 on all types of devices (e.g.

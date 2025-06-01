@@ -2,9 +2,10 @@ from typing import Optional
 import numpy as np
 from scipy.interpolate import interpn
 from deeplift.visualization import viz_sequence
+import matplotlib.pyplot as plt
 
 
-def density_scatter(x, y, ax, sort=True, bins=100, cmap="magma", **kwargs):
+def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="magma", **kwargs):
     """
     Scatter plot colored by 2d histogram
 
@@ -27,7 +28,10 @@ def density_scatter(x, y, ax, sort=True, bins=100, cmap="magma", **kwargs):
         idx = z.argsort()
         x, y, z = x[idx], y[idx], z[idx]
 
+    if ax is None:
+        _, ax = plt.subplots(1, 1)
     ax.scatter(x, y, c=z, cmap=cmap, **kwargs)
+    return ax.get_figure(), ax
 
 
 def plot_weights(
