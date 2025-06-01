@@ -53,21 +53,21 @@ task: Literal["ESC", "NSC"] = "ESC"
 random_state = 20240413  # for reproducibility
 
 # We train for a fixed number of epochs and post select the best model(s)
-max_epochs = 30
+max_epochs = 50
 
 batch_size = 256
 learning_rate = 0.01
 
 # Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
 # the data. Each time the data used for validation is different.
-folds = 5
+folds = None
 
 folds_list = range(folds) if folds else []
-frac_val = 0.00  # only relevant if not using folds
+frac_val = 0.10  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
-frac_test = 0.10
+frac_test = 0.00
 
 train = partial(
     nh.train,

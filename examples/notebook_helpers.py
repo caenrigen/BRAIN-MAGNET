@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import cnn_starr as cnn
 import data_module as dm
 import utils as ut
+import plot_utils as put
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def train(
         fold=fold,
         max_ep=max_epochs,
         weight_decay=weight_decay,
+        random_state=random_state,
     )
     # print(model)
 
@@ -126,3 +128,72 @@ def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
         fig.tight_layout()
 
     return best_checkpoints, fig, axs
+
+
+def evaluate_model(
+    fp_checkpoint: Path,
+    fp_dataset: Path,
+    device: torch.device,
+    random_state: Optional[int],
+    dataloader: str = "test_dataloader",
+):
+    model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
+
+    datamodule = dm.DataModule(
+        fp_dataset=fp_dataset,
+        targets_col=f"{model.hparams_initial.task}_log2_enrichment",
+        random_state=model.hparams_initial.get("random_state", random_state),
+        folds=model.hparams_initial.get("folds", None),
+        fold=model.hparams_initial.fold,
+        frac_test=model.hparams_initial.frac_test,
+        frac_val=model.hparams_initial.frac_val,
+        batch_size=model.hparams_initial.batch_size,
+    )
+    datamodule.setup()
+    dataloader = getattr(datamodule, dataloader)()
+
+    # Reuse our code to evaluate the model on the test set
+    trainer = L.Trainer(accelerator=device.type)
+    results_list = trainer.predict(model=model, dataloaders=dataloader)
+
+    # Concatenate the results
+    preds_list, targets_list = zip(*results_list)
+
+    preds = torch.cat(preds_list).squeeze().numpy()
+    targets = torch.cat(targets_list).squeeze().numpy()
+
+    mse, pearson, spearman = ut.model_stats(targets, preds)
+
+    return {
+        "model": model,
+        "datamodule": datamodule,
+        "dataloader": dataloader,
+        "mse": mse,
+        "pearson": pearson,
+        "spearman": spearman,
+        "preds": preds,
+        "targets": targets,
+    }
+
+
+def plot_corr(
+    x,
+    y,
+    title: str,
+    ax=None,
+    min_: Optional[float] = None,
+    max_: Optional[float] = None,
+):
+    if ax is None:
+        _, ax = plt.subplots(1, 1)
+    put.density_scatter(x, y, ax=ax)
+    ax.set_aspect("equal")
+    mse, pearson, spearman = ut.model_stats(x, y)
+    ax.set_title(f"{title}\n{mse=:.3f}, {pearson=:.3f}, {spearman=:.3f}")
+    if min_ is not None and max_ is not None:
+        diff = max_ - min_
+        min_ -= 0.1 * diff
+        max_ += 0.1 * diff
+        ax.set_xlim(min_, max_)
+        ax.set_ylim(min_, max_)
+    return ax.get_figure(), ax

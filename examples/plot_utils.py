@@ -5,7 +5,7 @@ from deeplift.visualization import viz_sequence
 import matplotlib.pyplot as plt
 
 
-def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="magma", **kwargs):
+def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs):
     """
     Scatter plot colored by 2d histogram
 

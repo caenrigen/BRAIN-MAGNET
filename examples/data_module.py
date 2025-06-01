@@ -14,6 +14,18 @@ import utils as ut
 
 logger = logging.getLogger(__name__)
 
+# For reference
+DATASET_COLS = (
+    "Chr",  # Chromosome
+    "Start",  # Start position in the chromosome
+    "End",  # End position in the chromosome
+    "Seq_len",  # Length of the sequence
+    "GC_counts",  # Number of G and C in the sequence
+    "NSC_log2_enrichment",  # Log2 enrichment of NSC
+    "ESC_log2_enrichment",  # Log2 enrichment of ESC
+    "Seq",  # Sequence
+)
+
 
 def bins(s, n: int = 8):
     return pd.cut(s, bins=n, labels=False)
@@ -28,6 +40,10 @@ def bins_log2(s, n: int = 8):
 
 def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
     return np.stack([data, data_rev]).T.flatten()
+
+
+def interleave_undo(data: np.ndarray):
+    return data.reshape(len(data) // 2, 2).T
 
 
 class MemMapDataset(Dataset):
@@ -170,7 +186,7 @@ class DataModule(L.LightningDataModule):
         )
 
     def concat_rev(self, indices):
-        if self.dataset_rev:
+        if self.augment_w_rev_comp:
             indices = np.asarray(indices, dtype=np.int64)
             # Interleave forward and reverse complement indices, instead of simply
             # concatenating them. Might help to learn faster.
@@ -231,6 +247,7 @@ class DataModule(L.LightningDataModule):
             self.dataset = self.dataset_fwd
 
         indices_train_val = np.arange(len(self.targets))
+        self.indices_full = self.concat_rev(indices_train_val)
         if self.frac_test:
             # Put aside a fraction of the data for a final testing
             indices_train_val, self.indices_test = train_test_split(
@@ -297,7 +314,7 @@ class DataModule(L.LightningDataModule):
 
         assert self.targets is not None
         len_targets = len(self.targets)
-        if self.dataset_rev:
+        if self.augment_w_rev_comp:
             len_targets *= 2
 
         # The data split must cover the whole dataset
@@ -318,8 +335,9 @@ class DataModule(L.LightningDataModule):
         assert self.indices_test is not None
         return self.DataLoader(self.dataset, sampler=self.indices_test)
 
-    def predict_dataloader(self):
-        return self.test_dataloader()
+    def full_dataloader(self):
+        assert self.indices_full is not None
+        return self.DataLoader(self.dataset, sampler=self.indices_full)
 
 
 def extract_fold(fp: Path):
