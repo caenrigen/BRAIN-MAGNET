@@ -31,9 +31,18 @@ def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
 
 
 class MemMapDataset(Dataset):
-    def __init__(self, fp_npy_1hot_seqs: Path, targets: np.ndarray):
+    def __init__(
+        self,
+        fp_npy_1hot_seqs: Path,
+        targets: np.ndarray,
+        rev_comp: bool = False,
+    ):
         self.targets = targets
         self.seqs_1hot: np.ndarray = np.load(fp_npy_1hot_seqs, mmap_mode="r")
+        self.rev_comp = rev_comp
+
+        if self.rev_comp:
+            self.seqs_1hot = ut.one_hot_reverse_complement(self.seqs_1hot)  # type: ignore
 
         if len(self.seqs_1hot) != len(self.targets):
             raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
@@ -84,7 +93,7 @@ class DataModule(L.LightningDataModule):
         x_col: str = "Seq",
         targets_col: str = "ESC_log2_enrichment",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
-        fp_npy_1hot_seqs_rev_comp: Optional[Union[Path, str]] = None,
+        augment_w_rev_comp: bool = True,
         random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to folds-1)
@@ -128,13 +137,7 @@ class DataModule(L.LightningDataModule):
             self.fp_npy_1hot_seqs: Optional[Path] = None
             self.fp_npy_1hot_seqs = self.fp_dataset.parent / "seqs.npy"
 
-        if fp_npy_1hot_seqs_rev_comp:
-            self.fp_npy_1hot_seqs_rev_comp = Path(fp_npy_1hot_seqs_rev_comp)
-            if not self.fp_npy_1hot_seqs_rev_comp.is_file():
-                raise FileNotFoundError(self.fp_npy_1hot_seqs_rev_comp)
-        else:
-            self.fp_npy_1hot_seqs_rev_comp = self.fp_dataset.parent / "seqs_rev.npy"
-
+        self.augment_w_rev_comp = augment_w_rev_comp
         self.x_col = x_col
         self.targets_col = targets_col
         self.random_state = random_state
@@ -185,16 +188,14 @@ class DataModule(L.LightningDataModule):
         """
 
         assert self.fp_npy_1hot_seqs is not None
-        assert self.fp_npy_1hot_seqs_rev_comp is not None
 
-        if self.fp_npy_1hot_seqs.exists() and self.fp_npy_1hot_seqs_rev_comp.exists():
+        if self.fp_npy_1hot_seqs.exists():
             return
 
         seqs_str = pd.read_csv(self.fp_dataset, usecols=[self.x_col])[self.x_col]
-        if self.fp_npy_1hot_seqs.exists() and self.fp_npy_1hot_seqs_rev_comp.exists():
+        if self.fp_npy_1hot_seqs.exists():
             logger.info(
-                f"Using precomputed one-hot encoded sequences: "
-                f"{self.fp_npy_1hot_seqs} and {self.fp_npy_1hot_seqs_rev_comp}"
+                f"Using precomputed one-hot encoded sequences: {self.fp_npy_1hot_seqs}"
             )
             return
 
@@ -207,14 +208,6 @@ class DataModule(L.LightningDataModule):
             logger.info(f"Saving one-hot encoded sequences: {self.fp_npy_1hot_seqs}")
             np.save(self.fp_npy_1hot_seqs, seqs_1hot)
 
-        if not self.fp_npy_1hot_seqs_rev_comp.exists():
-            seqs_1hot_rev_comp = ut.one_hot_reverse_complement(seqs_1hot)
-            logger.info(
-                f"Saving reverse-complement one-hot encoded sequences: "
-                f"{self.fp_npy_1hot_seqs_rev_comp}"
-            )
-            np.save(self.fp_npy_1hot_seqs_rev_comp, seqs_1hot_rev_comp)
-
     def setup(self, stage: Literal["fit", "test", None] = None):
         """It is safe to make state assignments here"""
 
@@ -226,10 +219,11 @@ class DataModule(L.LightningDataModule):
             fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
             targets=self.targets,
         )
-        if self.fp_npy_1hot_seqs_rev_comp:
+        if self.augment_w_rev_comp:
             self.dataset_rev = MemMapDataset(
-                fp_npy_1hot_seqs=self.fp_npy_1hot_seqs_rev_comp,
+                fp_npy_1hot_seqs=self.fp_npy_1hot_seqs,
                 targets=self.targets,
+                rev_comp=True,
             )
             self.dataset = ConcatDataset([self.dataset_fwd, self.dataset_rev])
         else:
