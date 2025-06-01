@@ -208,10 +208,7 @@ class DataModule(L.LightningDataModule):
             np.save(self.fp_npy_1hot_seqs, seqs_1hot)
 
         if not self.fp_npy_1hot_seqs_rev_comp.exists():
-            seqs_1hot_rev_comp = ut.sequences_1hot_to_reverse_complement(
-                seqs_1hot,  # type: ignore
-                is_transposed=True,
-            )
+            seqs_1hot_rev_comp = ut.one_hot_reverse_complement(seqs_1hot)
             logger.info(
                 f"Saving reverse-complement one-hot encoded sequences: "
                 f"{self.fp_npy_1hot_seqs_rev_comp}"

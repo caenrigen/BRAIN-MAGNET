@@ -77,10 +77,10 @@ class BrainMagnetCNN(L.LightningModule):
         if self.forward_mode == "forward":
             return self.model(x)
         elif self.forward_mode == "reverse_complement":
-            return self.model(ut.tensor_reverse_complement(x))
+            return self.model(ut.one_hot_reverse_complement(x))
         elif self.forward_mode == "mean":
             res_fwd = self.model(x)
-            res_rc = self.model(ut.tensor_reverse_complement(x))
+            res_rc = self.model(ut.one_hot_reverse_complement(x))
             return (res_fwd + res_rc) / 2  # take the average
         else:
             raise ValueError(f"{self.forward_mode = }")

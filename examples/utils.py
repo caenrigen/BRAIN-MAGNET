@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union, Literal
 from functools import partial
 import time
 
@@ -81,31 +81,39 @@ def pad_one_hot(one_hot: np.ndarray, to: int):
     return np.pad(one_hot, [(int(pad), int(np.ceil(pad))), (0, 0)], mode="constant")
 
 
-def unpad_one_hot(one_hot: np.ndarray):
-    # Drop all rows that are all zeros (zero padding)
-    return one_hot[one_hot.sum(axis=1, dtype=np.bool)]
-
-
-def one_hot_reverse_complement(one_hot, is_transposed: bool = False):
-    # Swap A <-> T and C <-> G channels. Channel order is (A=0, C=1, G=2, T=3)
-    channel_map = [3, 2, 1, 0]  # T, G, C, A
-    if is_transposed:
-        assert one_hot.shape[0] == 4, one_hot.shape
-        return np.flip(one_hot, axis=0)[channel_map, :]
+def unpad_one_hot(one_hot: np.ndarray, actg_axis: Literal[0, 1] = 1):
+    """Drop all zeros at the start or end of the sequence."""
+    assert one_hot.ndim == 2, one_hot.shape
+    assert actg_axis in (0, 1), actg_axis
+    # +1 because np.diff "shifts" towards the start of the array
+    idxs = np.diff(one_hot.sum(axis=actg_axis, dtype=np.bool)).nonzero()[0] + 1
+    if actg_axis == 1:
+        return one_hot[idxs[0] : idxs[-1]]
     else:
-        assert one_hot.shape[1] == 4, one_hot.shape
-        return np.flip(one_hot, axis=1)[:, channel_map]
+        return one_hot[:, idxs[0] : idxs[-1]]
 
 
-def tensor_reverse_complement(x: torch.Tensor):
-    assert x.ndim == 3, x.shape
-    assert x.shape[1] == 4, x.shape
-    # Flip along the length dimension (dim=2).
-    x_rev = torch.flip(x, dims=[2])
-    # Swap A <-> T and C <-> G channels. Channel order is (A=0, C=1, G=2, T=3)
-    channel_map = [3, 2, 1, 0]  # T, G, C, A
-    x_revcomp = x_rev[:, channel_map, :]
-    return x_revcomp
+def one_hot_reverse_complement(one_hot: Union[np.ndarray, torch.Tensor]):
+    """
+    Reverse complement a one-hot encoded sequence or a batch of one-hot encoded
+    sequences.
+
+    ! Reminder: If the `one_hot` input is padded, the padding will be flipped too.
+    """
+    # We need to flip along the bp_num dimension to obtain the "reverse".
+    # To obtain the complement we have to swap the channels:
+    # A <-> T and C <-> G
+    # Since the channel are encoded as (A=0, C=1, G=2, T=3), flipping this dimension
+    # has the desired effect too.
+    assert any(s == 4 for s in one_hot.shape[-2:])
+    assert len(one_hot.shape) in (2, 3), one_hot.shape
+    # Flipping return a view of the array, cheap operation.
+    if isinstance(one_hot, np.ndarray):
+        return np.flip(one_hot, (-2, -1))
+    elif isinstance(one_hot, torch.Tensor):
+        return torch.flip(one_hot, (-2, -1))
+    else:
+        raise NotImplementedError(f"Unsupported {type(one_hot) = !r}")
 
 
 def sequences_str_to_1hot(
@@ -115,18 +123,7 @@ def sequences_str_to_1hot(
 ):
     """Transpose to match how pytorch organizes data: (batch_size, channels=4, num_bp)"""
     func = partial(one_hot_encode, pad_to=pad_to, transpose=transpose)
-    seqs_1hot = list(map(func, sequences))
-    # Return the seqs_1hot so that we can use it for reverse complement
-    return np.stack(seqs_1hot, axis=0)
-
-
-def sequences_1hot_to_reverse_complement(
-    sequences_1hot: Sequence[np.ndarray],
-    is_transposed: bool = True,
-):
-    """Reverse complement numpy one-hot encoded sequences"""
-    func = partial(one_hot_reverse_complement, is_transposed=is_transposed)
-    return np.stack(list(map(func, sequences_1hot)), axis=0)
+    return np.stack(list(map(func, sequences)), axis=0)
 
 
 def read_tensorboard_log(
@@ -160,3 +157,74 @@ def model_stats(targets: np.ndarray, preds: np.ndarray):
     pearson = float(stats.pearsonr(targets, preds).statistic)  # type: ignore
     spearman = float(stats.spearmanr(targets, preds).statistic)  # type: ignore
     return mse, pearson, spearman
+
+
+def run_tests():
+    """Run tests for some of the functions in this module"""
+    seq = "ACCAGCT"
+    assert len(seq) % 2 == 1  # odd length since it is more tricky to handle
+
+    seq_revcomp = seq.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+
+    one_hot = one_hot_encode(seq, pad_to=10)
+    assert one_hot.shape == (10, 4)
+
+    batch = sequences_str_to_1hot([seq], pad_to=10, transpose=False)
+    assert batch.shape == (1, 10, 4)
+    assert np.all(batch[0] == one_hot)
+
+    batch = sequences_str_to_1hot([seq], pad_to=10, transpose=True)
+    assert batch.shape == (1, 4, 10)
+    assert np.all(batch[0].T == one_hot)
+
+    expected_1hot_list = [
+        [0, 0, 0, 0],  # padding
+        [1, 0, 0, 0],  # A
+        [0, 1, 0, 0],  # C
+        [0, 1, 0, 0],  # C
+        [1, 0, 0, 0],  # A
+        [0, 0, 1, 0],  # G
+        [0, 1, 0, 0],  # C
+        [0, 0, 0, 1],  # T
+        [0, 0, 0, 0],  # padding
+        [0, 0, 0, 0],  # padding
+    ]
+
+    expected_1hot = np.array(expected_1hot_list)
+    assert np.all(one_hot == expected_1hot)
+
+    unpadded = unpad_one_hot(one_hot)
+    assert np.all(unpadded == expected_1hot[1:-2])
+
+    reverse_complement = one_hot_reverse_complement(one_hot)
+    assert expected_1hot.shape == reverse_complement.shape
+    assert not np.all(reverse_complement == expected_1hot[::-1])
+
+    recovered = one_hot_reverse_complement(reverse_complement)
+    assert np.all(recovered == one_hot)
+
+    revcomp_1hot = one_hot_encode(seq_revcomp, pad_to=10)
+
+    # Expected to be different because the of the padding of a odd-length sequence
+    assert not np.all(reverse_complement == revcomp_1hot)
+    assert np.all(reverse_complement[1:] == revcomp_1hot[:-1])
+
+    batch = sequences_str_to_1hot([seq], pad_to=10, transpose=False)
+    batch_revcomp = one_hot_reverse_complement(batch)
+    assert np.all(reverse_complement == batch_revcomp[0])
+
+    batch = sequences_str_to_1hot([seq], pad_to=10, transpose=True)
+    batch_revcomp = one_hot_reverse_complement(batch)
+    assert np.all(reverse_complement == batch_revcomp[0].T)
+
+    one_hot_torch = torch.from_numpy(one_hot)
+    revcomp_torch = one_hot_reverse_complement(one_hot_torch)
+    assert np.all(reverse_complement == revcomp_torch.numpy())
+
+    batch_torch = torch.from_numpy(batch)
+    batch_revcomp_torch = one_hot_reverse_complement(batch_torch)
+    assert np.all(reverse_complement == batch_revcomp_torch.numpy()[0].T)
+
+
+if __name__ == "__main__":
+    run_tests()
