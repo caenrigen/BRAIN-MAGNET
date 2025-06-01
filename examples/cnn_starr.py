@@ -57,6 +57,8 @@ class BrainMagnetCNN(L.LightningModule):
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.AvgPool1d(2),
+            # Using AdaptiveAvgPool1d to make the output of the CNN independent of the
+            # input length. And avoid parameters explosion on the linear layer.
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),  # to be able to input into linear layer
             nn.Linear(16, 16),

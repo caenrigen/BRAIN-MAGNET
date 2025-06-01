@@ -44,10 +44,10 @@ fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 
 task: Literal["ESC", "NSC"] = "ESC"
 
-# The training should result in exactly the same models using the same seed,
-# same data loading and processing order, same model, same hyperparameters, same
+# The training should result in exactly the same weights using the same seed,
+# same data loading and processing order, same hyperparameters, same
 # software packages and same hardware.
-# Nontheless, be aware that even if you keep everything the same but the hardware
+# Nonetheless, be aware that even if you keep everything the same but the hardware
 # is different you might get slightly different results. On the same machine results
 # should be exactly the same.
 random_state = 20240413  # for reproducibility
