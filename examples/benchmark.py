@@ -48,7 +48,6 @@ device = torch.device("mps")
 
 # %%
 task, version = ("ESC", "8a6b9616")
-y_col = f"{task}_log2_enrichment"
 
 # %%
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
@@ -119,7 +118,6 @@ display(df_corr.spearman)
 # %%
 # Final model trained on 90% of the data, 10% for validation
 task, version = ("ESC", "762acb33")
-y_col = f"{task}_log2_enrichment"
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, fig, axs = nh.pick_best_checkpoints(df_ckpts, plot=True)
 
