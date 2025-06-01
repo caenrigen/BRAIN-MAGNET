@@ -16,37 +16,11 @@
 # %%
 import numpy as np
 import seaborn as sns
-import scipy as sp
 import matplotlib.pyplot as plt
-from scipy import stats
 import pandas as pd
-import math
-import time
-import random
-from tqdm.auto import tqdm
 from pathlib import Path
-from typing import Optional
-from functools import partial
-import lightning as L
 import torch
-from torch import nn
-import gc
-from torch.utils.data import DataLoader, TensorDataset
-from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split
-from random import randbytes
-from typing import List
 from itertools import combinations
-
-# %%
-dir_data = Path("/Volumes/Famafia/brain-magnet/")
-dir_train = dir_data / "train"
-assert dir_data.is_dir() and dir_train.is_dir()
-
-fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
-
-device = torch.device("mps")
 
 # %%
 # %load_ext autoreload
@@ -58,6 +32,15 @@ import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
 import notebook_helpers as nh
+
+# %%
+dir_data = Path("/Volumes/Famafia/brain-magnet/")
+dir_train = dir_data / "train"
+assert dir_data.is_dir() and dir_train.is_dir()
+
+fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
+
+device = torch.device("mps")
 
 # %% [markdown]
 # # Pick best checkpoints
@@ -86,7 +69,6 @@ for fold, fp in best_checkpoints.items():
         fp_checkpoint=fp,
         fp_dataset=fp_dataset,
         device=device,
-        random_state=20240413,  # temporary, I forgot to save it in the hyperparams
         dataloader="test_dataloader",
     )
     eval_result["fold"] = fold
@@ -135,8 +117,24 @@ display(df_corr.spearman)
 #
 
 # %%
-preds = eval_results[0]["preds"]
-targets = eval_results[0]["targets"]
+# Final model trained on 90% of the data, 10% for validation
+task, version = ("ESC", "762acb33")
+y_col = f"{task}_log2_enrichment"
+df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
+best_checkpoints, fig, axs = nh.pick_best_checkpoints(df_ckpts, plot=True)
+
+# %%
+fp = best_checkpoints[0]
+eval_result = nh.evaluate_model(
+    fp_checkpoint=fp,
+    fp_dataset=fp_dataset,
+    device=device,
+    dataloader="full_dataloader",
+)
+
+# %%
+preds = eval_result["preds"]
+targets = eval_result["targets"]
 
 # Undo interleaving of forward and reverse complement indices
 preds_fw, preds_rc = dm.interleave_undo(preds)
@@ -155,7 +153,7 @@ preds, preds_fw, preds_rc
 _ = nh.plot_corr(
     x=preds_fw,
     y=preds_rc,
-    title="Pred. forward vs Pred. reverse",
+    title="Predictions forward vs reverse",
     min_=min(preds_fw.min(), preds_rc.min()),
     max_=max(preds_fw.max(), preds_rc.max()),
 )
@@ -181,29 +179,6 @@ for (x, y, title), ax in zip(combs, axs.flatten()):
     nh.plot_corr(x=x, y=y, title=title, ax=ax, min_=targets.min(), max_=targets.max())
 fig.tight_layout()
 
-# %%
-fp = best_checkpoints[1]
-eval_result = nh.evaluate_model(
-    fp_checkpoint=fp,
-    fp_dataset=fp_dataset,
-    device=device,
-    random_state=20240413,  # temporary, I forgot to save it in the hyperparams
-    dataloader="full_dataloader",
-)
-
-# %%
-preds = eval_result["preds"]
-targets = eval_result["targets"]
-
-# Undo interleaving of forward and reverse complement indices
-preds_fw, preds_rc = dm.interleave_undo(preds)
-preds_av = (preds_fw + preds_rc) / 2
-
-targets_fw, targets_rc = dm.interleave_undo(targets)
-assert np.all(targets_fw == targets_rc)
-
-preds, preds_fw, preds_rc, preds_av
-
 # %% [markdown]
 # ## Distribution of predictions vs targets
 #
@@ -222,6 +197,12 @@ plt.vlines(preds_av.mean(), 0, ax.get_ylim()[1], color="C1", linestyle="--")
 # ax.set_xlim(0, 4)
 fig.set_figwidth(15)
 
+
+# %% [markdown]
+# The centers of the distributions are very close which is a good sign.
+#
+# The std of the predicitons is smaller. That is expected from a statistical model.
+#
 
 # %% [markdown]
 # ## Residuals vs Sequence Length

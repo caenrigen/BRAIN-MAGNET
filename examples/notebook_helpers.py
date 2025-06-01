@@ -111,9 +111,14 @@ def train(
 
 def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
     best_checkpoints = {}
+    folds = len(df_ckpts.fold.unique())
     if plot:
-        fig, axs = plt.subplots(1, 5, figsize=(15, 3), sharex=True, sharey=True)
-    for fold in range(5):
+        fig, axs = plt.subplots(
+            1, folds, figsize=(folds * 3, 3), sharex=True, sharey=True
+        )
+        if not isinstance(axs, list):
+            axs = [axs]
+    for fold in range(folds):
         df = df_ckpts[df_ckpts.fold == fold].copy()
         best_epoch = dm.pick_checkpoint(df, ax=axs[fold] if plot else None)
         df_best = df[df.epoch == best_epoch]
@@ -134,7 +139,6 @@ def evaluate_model(
     fp_checkpoint: Path,
     fp_dataset: Path,
     device: torch.device,
-    random_state: Optional[int],
     dataloader: str = "test_dataloader",
 ):
     model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
@@ -142,8 +146,8 @@ def evaluate_model(
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
         targets_col=f"{model.hparams_initial.task}_log2_enrichment",
-        random_state=model.hparams_initial.get("random_state", random_state),
-        folds=model.hparams_initial.get("folds", None),
+        random_state=model.hparams_initial.random_state,
+        folds=model.hparams_initial.folds,
         fold=model.hparams_initial.fold,
         frac_test=model.hparams_initial.frac_test,
         frac_val=model.hparams_initial.frac_val,

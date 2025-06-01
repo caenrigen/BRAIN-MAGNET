@@ -369,7 +369,7 @@ def list_checkpoints(
     df = s_fps.to_frame()
 
     df["version"], df["fold"] = zip(*df.fp.map(extract_fold))  # type: ignore
-    df["fold"] = df["fold"].astype(int)
+    df["fold"] = df["fold"].astype(float).fillna(0).astype(int)
     df["epoch"] = df.fp.map(extract_epoch)
     df.sort_values(["fold", "epoch"], inplace=True)
 
