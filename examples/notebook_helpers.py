@@ -116,7 +116,7 @@ def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
         fig, axs = plt.subplots(
             1, folds, figsize=(folds * 3, 3), sharex=True, sharey=True
         )
-        if not isinstance(axs, list):
+        if folds == 1:
             axs = [axs]
     for fold in range(folds):
         df = df_ckpts[df_ckpts.fold == fold].copy()
@@ -157,7 +157,9 @@ def evaluate_model(
     dataloader = getattr(datamodule, dataloader)()
 
     # Reuse our code to evaluate the model on the test set
-    trainer = L.Trainer(accelerator=device.type)
+
+    # logger=False to avoid creating a log directory for this run
+    trainer = L.Trainer(accelerator=device.type, logger=False)
     results_list = trainer.predict(model=model, dataloaders=dataloader)
 
     # Concatenate the results
