@@ -82,15 +82,17 @@ def pad_one_hot(one_hot: np.ndarray, to: int):
 
 
 def unpad_one_hot(one_hot: np.ndarray, actg_axis: Literal[0, 1] = 1):
-    """Drop all zeros at the start or end of the sequence."""
+    """Drop all zeros at the start and/or end of the sequence."""
     assert one_hot.ndim == 2, one_hot.shape
     assert actg_axis in (0, 1), actg_axis
     # +1 because np.diff "shifts" towards the start of the array
-    idxs = np.diff(one_hot.sum(axis=actg_axis, dtype=np.bool)).nonzero()[0] + 1
+    idxs = one_hot.sum(axis=actg_axis).nonzero()[0]
+    if idxs.size == 0:
+        return one_hot  # no padding, nothing to unpad
     if actg_axis == 1:
-        return one_hot[idxs[0] : idxs[-1]]
+        return one_hot[idxs[0] : idxs[-1] + 1]
     else:
-        return one_hot[:, idxs[0] : idxs[-1]]
+        return one_hot[:, idxs[0] : idxs[-1] + 1]
 
 
 def one_hot_reverse_complement(one_hot: Union[np.ndarray, torch.Tensor]):
@@ -195,6 +197,9 @@ def run_tests():
 
     unpadded = unpad_one_hot(one_hot)
     assert np.all(unpadded == expected_1hot[1:-2])
+    assert np.all(unpad_one_hot(one_hot[1:-2]) == expected_1hot[1:-2])
+    assert np.all(unpad_one_hot(one_hot[:-2]) == expected_1hot[1:-2])
+    assert np.all(unpad_one_hot(one_hot[1:]) == expected_1hot[1:-2])
 
     reverse_complement = one_hot_reverse_complement(one_hot)
     assert expected_1hot.shape == reverse_complement.shape
