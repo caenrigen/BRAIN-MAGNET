@@ -2,34 +2,25 @@ from functools import partial
 from typing import List, Optional
 import numpy as np
 import warnings
-from importlib import reload
 import torch
+from tqdm.auto import tqdm
 
 # Original repo:
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
-# Mirror over here:
-# https://github.com/caenrigen/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
+# Mirror over here with a fix to support latest ipython>=9 without import errors
+# https://github.com/caenrigen/shap/commit/53bf2b05a04e1a49cb398bc92b4e541860af0276
 import shap
 
 # Original repo:
 # https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
 # Mirror over here:
 # https://github.com/caenrigen/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
+# We only use the dinuc_shuffle module from deeplift to generate the shuffled sequences.
+# The shuffled sequences are necessary to estimate the hypothetical contributions scores.
 import deeplift.dinuc_shuffle as ds
 
 import utils as ut
 import cnn_starr as cnn
-
-# Reload in reverse order to be sure it works as intended
-reload(shap.explainers.deep.deep_pytorch)
-reload(shap.explainers.deep)
-reload(shap.explainers)
-reload(shap)
-
-reload(ds)
-
-reload(ut)
-reload(cnn)
 
 # Specify handler for Flatten used in our model, otherwise `shap_values` will emit
 # warnings and (potentially) use an incorrect handler.
@@ -42,7 +33,7 @@ def tensor_to_onehot(t):
     return t.detach().transpose(1, 0).cpu().numpy()
 
 
-def onehot_to_tensor_shape(one_hot: np.ndarray):
+def one_hot_to_tensor_shape(one_hot: np.ndarray):
     return one_hot.transpose(1, 0)
 
 
@@ -52,7 +43,7 @@ def make_shuffled_1hot_seqs(
     # 10 should already work well, 100 is on the high side
     device: torch.device,
     num_shufs: int = 30,
-    rng: Optional[np.random.RandomState] = np.random.RandomState(913),
+    rng: Optional[np.random.RandomState] = np.random.RandomState(20240413),
 ):
     # Assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
@@ -74,7 +65,7 @@ def make_shuffled_1hot_seqs(
     shufs = ds.dinuc_shuffle(ut.unpad_one_hot(seq_1hot), num_shufs=num_shufs, rng=rng)
     # Pad back to the original length
     shufs = map(partial(ut.pad_one_hot, to=seq_1hot.shape[0]), shufs)
-    shufs = map(onehot_to_tensor_shape, shufs)
+    shufs = map(one_hot_to_tensor_shape, shufs)
     # Putting this data to a device != "cpu" is futile and likely add overhead,
     # but the deep_pytorch code is spaghetti and won't work otherwise
     to_return = torch.tensor(np.array(list(shufs), dtype=np.float32), device=device)
@@ -99,8 +90,8 @@ def combine_multipliers_and_diff_from_ref(
     orig_inp_ = orig_inp[0]
     bg_data_ = bg_data[0]
 
-    # Perform some reshaping/transposing because the code was designed
-    # for inputs that are in the format (length x 4)
+    # Perform transposing because the code was designed for inputs that are in the
+    # format (length x 4)
     # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
     mult_ = mult_.transpose(0, 2, 1)
     # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
@@ -141,7 +132,7 @@ def combine_multipliers_and_diff_from_ref(
 
     # Average on the num_shufs axis to arrive to the final hypothetical
     # contribution scores (at each bp).
-    p_h_cbs_mean = onehot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
+    p_h_cbs_mean = one_hot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
     return [torch.tensor(p_h_cbs_mean)]
 
 
@@ -156,11 +147,12 @@ warnings.filterwarnings(
 
 def calc_contrib_scores(
     dataloader,
-    model_trained: cnn.CNNSTARR,
+    model_trained: cnn.BrainMagnetCNN,
     device: torch.device,
-    random_state: int = 913,
+    random_state: int = 20240413,
     num_shufs: int = 30,
     avg_w_revcomp: bool = True,
+    tqdm_bar: bool = True,
 ):
     """
     num_shufs: number of shuffled sequences to use as reference for the hypothetical
@@ -172,8 +164,14 @@ def calc_contrib_scores(
     inputs_all = []
     shap_vals_all = []
 
-    for batch, data in enumerate(dataloader):
-        inputs, _targets = data
+    items = tqdm(dataloader, total=len(dataloader)) if tqdm_bar else dataloader
+    for _batch, data in enumerate(items):
+        if isinstance(data, tuple):
+            inputs, _targets = data
+        elif isinstance(data, torch.Tensor):
+            inputs = data
+        else:
+            raise ValueError(f"Unknown {type(data) = }")
         # the DeepExplainer will evaluate the inputs to get the pytorch gradients,
         # put the inputs on the same device for faster inference when using GPU/MPS
         inputs = inputs.to(device)
@@ -194,19 +192,20 @@ def calc_contrib_scores(
         # These will be consumed by TF-MoDISco
         shap_vals = e.shap_values(inputs)
         if avg_w_revcomp:
-            shap_vals_revcomp = e.shap_values(ut.tensor_reverse_complement(inputs))
-            shap_vals_rc_equiv = [
-                ut.one_hot_reverse_complement(shap_val.T).T
-                for shap_val in shap_vals_revcomp
-            ]
+            # Padding of odd-length sequences will be flipped, but it is not a problem
+            # because we reverse-complement the shape values too before averaging with
+            # the forward shap values.
+            shap_vals_revcomp = np.array(
+                e.shap_values(ut.one_hot_reverse_complement(inputs))
+            )
             shap_vals = np.array(shap_vals)
-            # Average in-place
-            shap_vals += np.array(shap_vals_rc_equiv)
-            shap_vals /= 2
+            # one_hot_reverse_complement handles transposed batches
+            shap_vals += ut.one_hot_reverse_complement(shap_vals_revcomp)
+            shap_vals /= 2  # average
 
         inputs = inputs.detach()
-
         inputs_all.append(inputs)
+
         shap_vals_all.append(shap_vals)
 
     inputs_all = torch.cat(inputs_all, dim=0).cpu().numpy()

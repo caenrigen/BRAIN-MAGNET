@@ -25,6 +25,8 @@ DATASET_COLS = (
     "ESC_log2_enrichment",  # Log2 enrichment of ESC
     "Seq",  # Sequence
 )
+# for convenience, because we often don't need the sequences (which is heavy on memory)
+DATASET_COLS_NO_SEQ = DATASET_COLS[:-1]
 
 
 def bins(s, n: int = 8):

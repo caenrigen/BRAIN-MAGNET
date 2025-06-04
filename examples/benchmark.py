@@ -120,6 +120,7 @@ display(df_corr.spearman)
 task, version = ("ESC", "762acb33")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, fig, axs = nh.pick_best_checkpoints(df_ckpts, plot=True)
+best_checkpoints[0]
 
 # %%
 fp = best_checkpoints[0]

@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -14,105 +14,78 @@
 # ---
 
 # %%
-import os
+# Reload all python modules before executing each cell
+# %load_ext autoreload
+# %autoreload all
+
+# %%
+from itertools import combinations
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 # %%
-from importlib import reload
 import utils as ut
 import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
 import motif_discovery as md
-from tqdm.auto import tqdm
-
-_ = reload(ut)
-_ = reload(cnn)
-_ = reload(dm)
-_ = reload(put)
-_ = reload(md)
+import notebook_helpers as nh
 
 # %%
-random_state = 913
-dbmc = Path("/Users/victor/Documents/ProjectsDev/genomics/BRAIN-MAGNET")
-dbm = Path("/Volumes/Famafia/brain-magnet")
-dbmce = str(dbmc / "examples")
-dbmrd = dbm / "rd_APP_data"
-dbmt = dbm / "train"
-os.chdir(dbmce)
+dir_data = Path("/Volumes/Famafia/brain-magnet/")
+assert dir_data.is_dir()
+dir_train = dir_data / "train"
+dir_train.mkdir(exist_ok=True)
+
+fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
+
+device = torch.device("mps")
 
 # %%
-print(torch.cuda.is_available(), torch.backends.mps.is_available())
-device = torch.device("mps")  # cpu/mps/cuda
-device
-
-# %% [raw]
-# task = "ESC"
-# df = dm.load_enrichment_data(
-#     fp=dbmrd / "Enhancer_activity_w_seq.csv.gz",
-#     y_col=f"{task}_log2_enrichment",
-# )
-# q = df.ESC_log2_enrichment.sort_values(ascending=True).quantile(0.95)
-# df_sample = df[df.ESC_log2_enrichment > q]
-# print(df_sample.shape)
-# fp = dbmrd / "Enhancer_activity_w_seq_top_5_percent.csv.gz"
-# df_sample.to_csv(fp, index=False)
-# df_sample
+task, version = "ESC", "762acb33"
+fp_checkpoint = dir_train / f"{task}/{version}/checkpoints/epoch=014.ckpt"
+assert fp_checkpoint.exists()
 
 # %%
-task = "ESC"
-y_col = f"{task}_log2_enrichment"
-df_sample = dm.load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq_top_ESC_5_percent.csv.gz",
-    y_col=y_col,
-)
-df_sample.sort_values(by=y_col, ascending=False, inplace=True)
-df_sample_mini = df_sample[:10].copy()
-
-# %%
-dataset = dm.make_tensor_dataset(
-    df=df_sample_mini,
-    x_col="SeqEnc",
-    y_col=y_col,
-    device=device,
-)
-dataloader = DataLoader(dataset, batch_size=256, shuffle=False)
-dataloader
+df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS_NO_SEQ)
+df_enrichment.head()
 
 
 # %%
-def load_model(
-    version: str,
-    fold: int,
-    device: torch.device = device,
+def load_model_and_full_dataloader(
+    fp_checkpoint: Path, fp_dataset: Path, indices: np.ndarray
 ):
-    fp_model_checkpoint = dm.pick_best_checkpoint(
-        dbmt, version=version, task=task, fold=fold
+    model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
+    datamodule = dm.DataModule(
+        fp_dataset=fp_dataset,
+        targets_col=f"{task}_log2_enrichment",
+        augment_w_rev_comp=False,
+        batch_size=256,
     )
-    return cnn.load_model(
-        fp=fp_model_checkpoint,
-        device=device,
-        forward_mode="main",
-    )
+    datamodule.setup()
+    # `datamodule.DataLoader` is based on a partial function, we only need to pass
+    # the indices to the sampler
+    dataloader = datamodule.DataLoader(datamodule.dataset, sampler=indices)
+    return model, dataloader
 
+
+# %%
+sample_size = 10  # small sample for some fast estimates, shap is pretty slow
+targets = df_enrichment[f"{task}_log2_enrichment"]
+top_targets = targets.sort_values(ascending=False)[:sample_size]
+idxs_sample = top_targets.index.to_numpy()
+top_targets
 
 # %% [markdown]
 # # Impact of averaging with rev. compl. and the number of shuffles
 #
 
 # %%
-version, fold = "cc0e922b", 0
-model_trained = load_model(version, fold)
-
-# %%
-reload(md)
-
 # Two distinct seeds to use for calculating a Pearson correlation
 seed_a = 123
 seed_b = 456
@@ -122,6 +95,11 @@ seeds = [seed_a, seed_b]
 # calculating hypothetical contribution scores
 num_shufs_list = [3, 10, 30, 50, 100, 200, 300, 500]
 
+model_trained, dataloader = load_model_and_full_dataloader(
+    fp_checkpoint=fp_checkpoint,
+    fp_dataset=fp_dataset,
+    indices=idxs_sample,
+)
 pearson = {False: {}, True: {}}
 for avg_w_revcomp in [False, True]:
     for num_shufs in tqdm(num_shufs_list, desc=f"avg_w_revcomp={avg_w_revcomp}"):
@@ -134,10 +112,11 @@ for avg_w_revcomp in [False, True]:
                 random_state=seed,
                 num_shufs=num_shufs,
                 avg_w_revcomp=avg_w_revcomp,
+                tqdm_bar=False,
             )
             res[seed] = shap_vals
 
-        # Take the average using along the sequences of our sample dataset
+        # Take the average over the sequences of our sample dataset
         pearson[avg_w_revcomp][num_shufs] = np.mean(
             [
                 stats.pearsonr(
@@ -168,19 +147,19 @@ _ = ax.legend()
 #
 # 1. There is a significant variation in the calculated contribution scores depending on which shuffled sequences are used as reference. In other words for relatively little amount of shuffles, the chosen seed matters.
 # 2. As expected, increasing the number of shuffled reference sequences leads to more consistent results decreasing the dependence on the seed used for generating the pseudo-random shuffles.
-# 3. Averaging the contribution scores obtained from inputting both the "forward" and reverse complement strands greatly enhances the robustness.
+# 3. Averaging the contribution scores obtained from inputting both the "forward" and the reverse complement strands greatly enhances the robustness.
 #
-# If **not using** reverse complement averaging:
+# If **not** averaging with the reverse complement:
 #
-# - 100 shuffles is a solid amount for achieving very high correlation (~97%).
-# - 30 shuffles is fairly good for quicker computation without big compromise (~90% correlation).
-# - 10 shuffles seems a bit low with "only" ~80% correlation.
+# - 100 shuffles is a solid amount for achieving very high correlation (~98%).
+# - 30 shuffles is fairly good for quicker computation without big compromise (~90-95% correlation).
+# - 10 shuffles seems a bit low with "only" ~80-85% correlation.
 #
-# If **using** reverse complement averaging (requires x2 GPU computation and <= x2 CPU computation):
+# If averaging with reverse complement (requires x2 GPU computation and <= x2 CPU computation):
 #
 # - 100 shuffles is likely unnecessarily large amount (~99% correlation).
-# - 30 shuffles is excellent (~96% correlation).
-# - 10 shuffles might be already enough (~89% correlation).
+# - 30 shuffles is excellent (~96-97% correlation).
+# - 10 shuffles might be already enough (~90% correlation).
 #
 
 # %% [markdown]
@@ -191,36 +170,38 @@ _ = ax.legend()
 #
 
 # %%
+task, version = ("ESC", "8a6b9616")
+df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
+best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
+best_checkpoints
+
+# %%
+random_state = 20240413
 num_shufs = 30
 version = "cc0e922b"
-folds = 5  # we trained 5 kfolds
 
 pearson = {}
 res = {}
-for fold in tqdm(range(folds)):
+for fold, fp in tqdm(best_checkpoints.items()):
     inputs, shap_vals = md.calc_contrib_scores(
         dataloader,
-        model_trained=load_model(version, fold),
+        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,
         avg_w_revcomp=True,
+        tqdm_bar=False,
     )
     res[fold] = shap_vals
 
 
-for fold_i in range(folds):
-    for fold_j in range(fold_i + 1, folds):
-        if fold_i == fold_j:
-            continue
-        pearson[(fold_i, fold_j)] = np.mean(
-            [
-                stats.pearsonr(
-                    res[fold_i][i].flatten(), res[fold_j][i].flatten()
-                ).statistic
-                for i in range(inputs.shape[0])
-            ]
-        )
+for fa, fb in combinations(range(len(best_checkpoints)), 2):
+    pearson[(fa, fb)] = np.mean(
+        [
+            stats.pearsonr(res[fa][i].flatten(), res[fb][i].flatten()).statistic
+            for i in range(inputs.shape[0])
+        ]
+    )
 
 pearson
 
@@ -229,23 +210,16 @@ pearson
 #
 
 # %%
-reload(md)
-dataset = dm.make_tensor_dataset(
-    df=df_sample_mini[:1],
-    x_col="SeqEnc",
-    y_col=y_col,
-    device=device,
-)
-dataloader = DataLoader(dataset, batch_size=256, shuffle=False)
-
 res = []
-for fold in range(folds):
+for fold, fp in tqdm(best_checkpoints.items()):
     (input_seq_T, *_), (shap_val, *_) = md.calc_contrib_scores(
         dataloader,
-        model_trained=load_model(version, fold),
+        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,
+        avg_w_revcomp=True,
+        tqdm_bar=False,
     )
     res.append(shap_val)
 
@@ -253,12 +227,15 @@ shap_val_avg = np.array(res).mean(axis=0)
 shap_val_avg.shape
 
 # %%
-reload(put)
 start, stop = None, None
 hypothetical = False
 
-# last fold from the loop above
+# Plot for a single fold (last fold from the loop above)
 put.plot_weights(input_seq_T, shap_val, start, stop, hypothetical)
+# Plot for the average of all folds
 put.plot_weights(input_seq_T, shap_val_avg, start, stop, hypothetical)
 
-# %%
+
+# %% [markdown]
+# There are some significant differences that can be observed visually between using a single model or averaging across all 5 models from the 5-folds training.
+#

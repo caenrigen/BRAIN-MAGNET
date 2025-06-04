@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -14,95 +14,87 @@
 # ---
 
 # %%
-from importlib import reload
+# Reload all python modules before executing each cell
+# %load_ext autoreload
+# %autoreload all
+
+# %%
 import utils as ut
 import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
 import motif_discovery as md
-
-_ = reload(ut)
-_ = reload(cnn)
-_ = reload(dm)
-_ = reload(put)
-_ = reload(md)
+import notebook_helpers as nh
+from tqdm.auto import tqdm
 
 # %%
-import os
 import numpy as np
-import seaborn as sns
-import scipy as sp
-import matplotlib.pyplot as plt
-from scipy import stats
-import pandas as pd
-import math
-import time
-import random
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader
 
 # %%
-random_state = 913
-# random.seed(random_state)
+dir_data = Path("/Volumes/Famafia/brain-magnet/")
+assert dir_data.is_dir()
+dir_train = dir_data / "train"
+dir_train.mkdir(exist_ok=True)
+dir_cb_score = dir_data / "cb_score"
+dir_cb_score.mkdir(exist_ok=True)
 
-dbmc = Path("/Users/victor/Documents/ProjectsDev/genomics/BRAIN-MAGNET")
-dbm = Path("/Volumes/Famafia/brain-magnet")
+fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 
-# dbmc = Path("/Users/victor/sshpyk_code")
-# dbm = Path("/Users/victor/sshpyk_data/")
-
-dbmce = str(dbmc / "examples")
-dbmrd = dbm / "rd_APP_data"
-dbmt = dbm / "train"
-os.chdir(dbmce)
-
-# %%
-print(torch.cuda.is_available(), torch.backends.mps.is_available())
-# device = torch.device("cuda")
-# device = torch.device("cpu")
 device = torch.device("mps")
-device
 
 # %%
-task = "ESC"
-y_col = f"{task}_log2_enrichment"
-df_sample = dm.load_enrichment_data(
-    fp=dbmrd / "Enhancer_activity_w_seq_top_ESC_5_percent.csv.gz",
-    y_col=y_col,
+task, version = ("ESC", "8a6b9616")
+df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
+best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
+
+# %%
+# Set to 0 to use the entire dataset
+# Set to some small fraction to use a small random sample of the dataset
+sample_frac = 0.0
+
+datamodule = dm.DataModule(
+    fp_dataset=fp_dataset,
+    targets_col=f"{task}_log2_enrichment",
+    augment_w_rev_comp=True,
+    batch_size=256,
+    frac_test=sample_frac,
 )
-df_sample_mini = df_sample.sort_values(by=y_col, ascending=False)[:10].copy()
-df_sample_mini
+datamodule.setup()
+
+if sample_frac:
+    dataloader = datamodule.test_dataloader()
+else:
+    dataloader = datamodule.full_dataloader()
 
 # %% [markdown]
 # # Calculate contribution score
 #
 
 # %%
-dataset = dm.make_tensor_dataset(
-    df=df_sample_mini, x_col="SeqEnc", y_col=f"{task}_log2_enrichment", device=device
-)
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-dataloader
+random_state = 20240413
+num_shufs = 30
 
-# %%
-version, fold = "cc0e922b", 0
-fp_model_checkpoint = dm.pick_best_checkpoint(
-    dp_train=dbmt, version=version, task=task, fold=fold
-)
-model_trained = cnn.load_model(
-    fp=fp_model_checkpoint,
-    device=device,
-    forward_mode="main",
-)
-fp_model_checkpoint
+pearson = {}
+res = {}
+for fold, fp in tqdm(best_checkpoints.items()):
+    inputs, shap_vals = md.calc_contrib_scores(
+        dataloader,
+        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
+        device=device,
+        random_state=random_state,
+        num_shufs=num_shufs,
+        avg_w_revcomp=True,
+        tqdm_bar=True,
+    )
+    fp = dir_cb_score / f"{task}_{version}_{fold}_shap_vals.npz"
+    np.savez_compressed(fp, shap_vals)
 
-# %%
-reload(md)
-inputs, shap_vals = md.calc_contrib_scores(
-    dataloader, model_trained=model_trained, device=device
-)
+# These we only need to save once
+fp = dir_cb_score / f"{task}_{version}_input_seqs.npz"
+np.savez_compressed(fp, inputs)
 
-# %%
-seq_idx = 0
-put.plot_weights(inputs[seq_idx], shap_vals[seq_idx])
+# %% [raw] vscode={"languageId": "raw"}
+# modisco motifs -w 1000 -s ESC_cc0e922b_0_top_5_percent_input_seqs.npz -a ESC_cc0e922b_0_top_5_percent_shap_vals.npz -n 2000 -o modisco_results.h5
+# modisco report -i modisco_results.h5 -o report/ -s report/
