@@ -72,12 +72,16 @@ else:
 # # Calculate contribution score
 #
 
+# %% [markdown]
+# ⚠️ **WARNING**
+#
+# Runnning `calc_contrib_scores` on the full dataset can take 3+ hours and 30GB of RAM!
+#
+
 # %%
 random_state = 20240413
 num_shufs = 30
 
-pearson = {}
-res = {}
 for fold, fp in tqdm(best_checkpoints.items()):
     inputs, shap_vals = md.calc_contrib_scores(
         dataloader,
