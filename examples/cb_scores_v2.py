@@ -44,6 +44,10 @@ fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 
 device = torch.device("mps")
 
+# %% [markdown]
+# # Choose models and dataloader
+#
+
 # %%
 task, version = ("ESC", "8a6b9616")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
@@ -57,7 +61,7 @@ sample_frac = 0.0
 datamodule = dm.DataModule(
     fp_dataset=fp_dataset,
     targets_col=f"{task}_log2_enrichment",
-    augment_w_rev_comp=True,
+    augment_w_rev_comp=False,
     batch_size=256,
     frac_test=sample_frac,
 )
