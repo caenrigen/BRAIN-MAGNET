@@ -165,7 +165,7 @@ def calc_contrib_scores(
     shap_vals_all = []
 
     items = tqdm(dataloader, total=len(dataloader)) if tqdm_bar else dataloader
-    for _batch, data in enumerate(items):
+    for data in items:
         if isinstance(data, tuple):
             inputs, _targets = data
         elif isinstance(data, torch.Tensor):
@@ -193,8 +193,9 @@ def calc_contrib_scores(
         shap_vals = e.shap_values(inputs)
         if avg_w_revcomp:
             # Padding of odd-length sequences will be flipped, but it is not a problem
-            # because we reverse-complement the shape values too before averaging with
+            # because we reverse-complement the shap values too before averaging with
             # the forward shap values.
+            # np.array() is necessary because `e.shap_values` returns a list.
             shap_vals_revcomp = np.array(
                 e.shap_values(ut.one_hot_reverse_complement(inputs))
             )
@@ -208,7 +209,8 @@ def calc_contrib_scores(
 
         shap_vals_all.append(shap_vals)
 
-    inputs_all = torch.cat(inputs_all, dim=0).cpu().numpy()
+    # Convert to int8 to save memory, one-hot values are simply 0s or 1s
+    inputs_all = torch.cat(inputs_all, dim=0).cpu().numpy().astype(np.int8)
 
     shap_vals_all = np.concatenate(shap_vals_all, axis=0)
 
