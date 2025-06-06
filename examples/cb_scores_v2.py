@@ -114,19 +114,3 @@ for fold, fp in tqdm(best_checkpoints.items()):
     for inputs, shap_vals in gen:
         # we are writing to disk, so we don't need to keep the data in memory
         del inputs, shap_vals
-
-# %% [markdown]
-# ## Average the contribution scores
-#
-
-# %% [raw]
-# fps = list(dir_cb_score.glob(f"{task}_{version}_*_shap_vals.npy"))
-# [fp.name for fp in fps]
-
-# %% [raw]
-# arr_mmap = np.load(fps[0], mmap_mode="r")
-# arr_mmap.shape, arr_mmap.dtype
-
-# %% [raw] vscode={"languageId": "raw"}
-# modisco motifs --window 1000 --sequences ESC_8a6b9616_input_seqs.npy --attributions ESC_8a6b9616_shap_vals.npy --max_seqlets 20000 --output modisco_results_n20000.h5
-# modisco report --h5py modisco_results_n10000.h5 --output ./report/ --suffix ./

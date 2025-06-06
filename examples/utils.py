@@ -45,7 +45,7 @@ def make_one_hot_encode(alphabet: str = "ACGT", dtype=np.uint8) -> np.ndarray:
     C -> [0,1,0,0]
     G -> [0,0,1,0]
     T -> [0,0,0,1]
-    N -> [0,0,0,0]
+    N -> [0,0,0,0] (or any other character)
     """
     hash_table = np.zeros((np.iinfo(np.uint8).max, len(alphabet)), dtype=dtype)
     hash_table[to_uint8(alphabet)] = np.eye(len(alphabet), dtype=dtype)
