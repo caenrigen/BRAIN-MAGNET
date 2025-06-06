@@ -105,7 +105,7 @@ for avg_w_revcomp in [False, True]:
     for num_shufs in tqdm(num_shufs_list, desc=f"avg_w_revcomp={avg_w_revcomp}"):
         res = {}
         for seed in seeds:
-            inputs, shap_vals = md.calc_contrib_scores(
+            inputs, shap_vals = md.calc_contrib_scores_concatenated(
                 dataloader,
                 model_trained=model_trained,
                 device=device,
@@ -183,7 +183,7 @@ version = "cc0e922b"
 pearson = {}
 res = {}
 for fold, fp in tqdm(best_checkpoints.items()):
-    inputs, shap_vals = md.calc_contrib_scores(
+    inputs, shap_vals = md.calc_contrib_scores_concatenated(
         dataloader,
         model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
         device=device,
@@ -212,7 +212,7 @@ pearson
 # %%
 res = []
 for fold, fp in tqdm(best_checkpoints.items()):
-    (input_seq_T, *_), (shap_val, *_) = md.calc_contrib_scores(
+    (input_seq_T, *_), (shap_val, *_) = md.calc_contrib_scores_concatenated(
         dataloader,
         model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
         device=device,

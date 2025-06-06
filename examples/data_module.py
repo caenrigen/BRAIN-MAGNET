@@ -108,10 +108,10 @@ class DataModule(L.LightningDataModule):
     def __init__(
         self,
         fp_dataset: Union[Path, str],
+        augment_w_rev_comp: bool,
         x_col: str = "Seq",
         targets_col: str = "ESC_log2_enrichment",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
-        augment_w_rev_comp: bool = True,
         random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
         fold: int = 0,  # Current fold index (0 to folds-1)
@@ -178,7 +178,9 @@ class DataModule(L.LightningDataModule):
         # A convenience wrapper for instantiating DataLoader
         self.DataLoader = partial(
             DataLoader,
-            shuffle=False,  # we already shuffle the indices when splitting data
+            # we already shuffle the indices when splitting data.
+            # For the full dataset, we want to stay consistent with the original order.
+            shuffle=False,
             collate_fn=collate,
             num_workers=num_workers,
             multiprocessing_context=multiprocessing_context,
@@ -227,7 +229,7 @@ class DataModule(L.LightningDataModule):
             np.save(self.fp_npy_1hot_seqs, seqs_1hot)
 
     def setup(self, stage: Literal["fit", "test", None] = None):
-        """It is safe to make state assignments here"""
+        """It is ok to make state assignments in this method"""
 
         df = pd.read_csv(self.fp_dataset, usecols=[self.targets_col])
         self.targets = df[self.targets_col].to_numpy()
