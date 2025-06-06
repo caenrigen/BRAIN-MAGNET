@@ -31,7 +31,7 @@ def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs)
     if ax is None:
         _, ax = plt.subplots(1, 1)
     ax.scatter(x, y, c=z, cmap=cmap, **kwargs)
-    return ax.get_figure(), ax
+    return ax
 
 
 def plot_weights(

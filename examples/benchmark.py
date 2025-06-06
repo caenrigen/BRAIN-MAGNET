@@ -69,6 +69,7 @@ for fold, fp in best_checkpoints.items():
         fp_dataset=fp_dataset,
         device=device,
         dataloader="test_dataloader",
+        augment_w_rev_comp=True,
     )
     eval_result["fold"] = fold
     eval_results.append(eval_result)
@@ -129,6 +130,7 @@ eval_result = nh.evaluate_model(
     fp_dataset=fp_dataset,
     device=device,
     dataloader="full_dataloader",
+    augment_w_rev_comp=True,
 )
 
 # %%

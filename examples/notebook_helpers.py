@@ -32,6 +32,7 @@ def train(
     version: Optional[str] = None,
     empty_cache: bool = True,
     weight_decay: float = 0.0,
+    augment_w_rev_comp: bool = True,
 ):
     if empty_cache:
         ut.empty_cache(device)
@@ -53,6 +54,7 @@ def train(
         max_ep=max_epochs,
         weight_decay=weight_decay,
         random_state=random_state,
+        augment_w_rev_comp=augment_w_rev_comp,
     )
     # print(model)
 
@@ -85,6 +87,7 @@ def train(
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
         random_state=random_state,
+        augment_w_rev_comp=augment_w_rev_comp,
         folds=folds or None,
         fold=fold,
         frac_test=frac_test,
@@ -141,9 +144,15 @@ def evaluate_model(
     fp_checkpoint: Path,
     fp_dataset: Path,
     device: torch.device,
+    augment_w_rev_comp: Optional[bool] = None,
     dataloader: str = "test_dataloader",
 ):
     model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
+
+    # Allow to override or use the value from training
+    if augment_w_rev_comp is None:
+        augment_w_rev_comp = model.hparams_initial.augment_w_rev_comp
+    assert isinstance(augment_w_rev_comp, bool)
 
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
@@ -154,6 +163,7 @@ def evaluate_model(
         frac_test=model.hparams_initial.frac_test,
         frac_val=model.hparams_initial.frac_val,
         batch_size=model.hparams_initial.batch_size,
+        augment_w_rev_comp=augment_w_rev_comp,
     )
     datamodule.setup()
     dataloader = getattr(datamodule, dataloader)()
