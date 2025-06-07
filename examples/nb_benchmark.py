@@ -34,7 +34,7 @@ import plot_utils as put
 import notebook_helpers as nh
 
 # %%
-dir_data = Path("/Volumes/Famafia/brain-magnet/")
+dir_data = Path("./data")
 dir_train = dir_data / "train"
 assert dir_data.is_dir() and dir_train.is_dir()
 
@@ -47,6 +47,7 @@ device = torch.device("mps")
 #
 
 # %%
+# k-folds models trained on 90% of the data, 10% for testing
 task, version = ("ESC", "8a6b9616")
 
 # %%

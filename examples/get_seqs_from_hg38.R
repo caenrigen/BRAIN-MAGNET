@@ -6,7 +6,7 @@
 #       extension: .R
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: R
 #     language: R
@@ -23,7 +23,7 @@ library(data.table)  # for fast file reading/writing
 np <- import("numpy")
 
 # %%
-setwd("/Volumes/Famafia/brain-magnet/rd_APP_data")
+setwd("./data/rd_APP_data")
 
 # %%
 enhancers <- fread("Enhancer_activity.txt", sep = "\t")

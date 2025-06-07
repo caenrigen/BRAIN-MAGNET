@@ -81,15 +81,15 @@ def pad_one_hot(one_hot: np.ndarray, to: int):
     return np.pad(one_hot, [(int(pad), int(np.ceil(pad))), (0, 0)], mode="constant")
 
 
-def unpad_one_hot(one_hot: np.ndarray, actg_axis: Literal[0, 1] = 1):
+def unpad_one_hot(one_hot: np.ndarray, acgt_axis: Literal[0, 1] = 1):
     """Drop all zeros at the start and/or end of the sequence."""
     assert one_hot.ndim == 2, one_hot.shape
-    assert actg_axis in (0, 1), actg_axis
+    assert acgt_axis in (0, 1), acgt_axis
     # +1 because np.diff "shifts" towards the start of the array
-    idxs = one_hot.sum(axis=actg_axis).nonzero()[0]
+    idxs = one_hot.sum(axis=acgt_axis).nonzero()[0]
     if idxs.size == 0:
         return one_hot  # no padding, nothing to unpad
-    if actg_axis == 1:
+    if acgt_axis == 1:
         return one_hot[idxs[0] : idxs[-1] + 1]
     else:
         return one_hot[:, idxs[0] : idxs[-1] + 1]
@@ -108,7 +108,7 @@ def one_hot_reverse_complement(one_hot: Union[np.ndarray, torch.Tensor]):
     # Since the channel are encoded as (A=0, C=1, G=2, T=3), flipping this dimension
     # has the desired effect too.
     assert any(s == 4 for s in one_hot.shape[-2:])
-    assert len(one_hot.shape) in (2, 3), one_hot.shape
+    assert one_hot.ndim in (2, 3), one_hot.shape
     # Flipping return a view of the array, cheap operation.
     if isinstance(one_hot, np.ndarray):
         return np.flip(one_hot, (-2, -1))

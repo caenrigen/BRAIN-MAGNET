@@ -29,7 +29,7 @@ import plot_utils as put
 
 
 # %%
-dir_data = Path("/Volumes/Famafia/brain-magnet")
+dir_data = Path("./data")
 fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 
 # %%
@@ -83,4 +83,3 @@ ax.set_ylabel("ESC Log2 Enrichment")
 ax.set_title("Comparative ESC vs NSC")
 ax.set_aspect("equal")
 _ = ax.set_ylim(ax.get_ylim()[0], ax.get_xlim()[1])
-

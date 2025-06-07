@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -34,7 +34,7 @@ import gc
 random_state = 913
 random.seed(random_state)
 
-dbm = Path("/Volumes/Famafia/brain-magnet/")
+dbm = Path("./data")
 dbmrd = dbm / "rd_APP_data"
 dbmt = dbm / "train"
 
@@ -455,6 +455,7 @@ for c in ("Seq",):
 
 # %% [markdown]
 # ### Split data for training
+
 
 # %%
 def bins(s):

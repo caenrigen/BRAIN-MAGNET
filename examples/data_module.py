@@ -65,8 +65,8 @@ class MemMapDataset(Dataset):
         if len(self.seqs_1hot) != len(self.targets):
             raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
 
-        if len(self.seqs_1hot.shape) != 3:
-            raise ValueError(f"{self.seqs_1hot.shape = } must be 3")
+        if self.seqs_1hot.ndim != 3:
+            raise ValueError(f"{self.seqs_1hot.ndim = } must be 3")
         if self.seqs_1hot.shape[1] != 4:
             raise ValueError(f"{self.seqs_1hot.shape[1] = } must be 4")
 
@@ -142,6 +142,8 @@ class DataModule(L.LightningDataModule):
                 "frac_val does not apply for folds. "
                 "Set frac_val=0 if you are using folds (or set folds=None)."
             )
+        if not frac_val and not folds:
+            raise ValueError("frac_val and folds cannot be both zero")
 
         self.fp_dataset = Path(fp_dataset)
         if not self.fp_dataset.is_file():

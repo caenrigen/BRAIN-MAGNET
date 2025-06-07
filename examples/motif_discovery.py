@@ -128,7 +128,7 @@ def combine_multipliers_and_diff_from_ref(
 
     len_one_hot, num_bp = 4, orig_inp_.shape[0]
 
-    assert len(orig_inp_.shape) == 2, orig_inp_.shape
+    assert orig_inp_.ndim == 2, orig_inp_.shape
     assert orig_inp_.shape[-1] == len_one_hot, orig_inp_.shape
 
     # We don't need zeros, these will be overwritten

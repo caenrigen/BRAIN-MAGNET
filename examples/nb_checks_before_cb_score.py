@@ -36,7 +36,7 @@ import motif_discovery as md
 import notebook_helpers as nh
 
 # %%
-dir_data = Path("/Volumes/Famafia/brain-magnet/")
+dir_data = Path("./data")
 assert dir_data.is_dir()
 dir_train = dir_data / "train"
 dir_train.mkdir(exist_ok=True)

@@ -129,12 +129,12 @@ def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
         df_best = df[df.epoch == best_epoch]
         assert len(df_best) == 1
         best_checkpoints[fold] = df_best.fp.iloc[0]
-        if axs:
+        if axs is not None:
             max_ = df_ckpts.loss_val.quantile(0.95)  # don't plot outliers
             min_ = df_ckpts.loss_train.min()
             axs[fold].set_ylim(min_ - (max_ - min_) * 0.05, max_)
 
-    if fig:
+    if fig is not None:
         fig.tight_layout()
 
     return best_checkpoints, fig, axs

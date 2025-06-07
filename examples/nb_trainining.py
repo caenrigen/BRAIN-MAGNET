@@ -27,8 +27,6 @@ from tqdm.auto import tqdm
 # %aimport utils, cnn_starr, data_module, notebook_helpers
 
 import utils as ut
-import cnn_starr as cnn
-import data_module as dm
 import notebook_helpers as nh
 
 
@@ -38,9 +36,10 @@ device = torch.device("mps")  # mps/cuda/cpu
 device
 
 # %%
-dir_data = Path("/Volumes/Famafia/brain-magnet")
-dir_train = dir_data / "train"
+dir_data = Path("./data")
+dir_train = dir_data / "train"  # Tensorboard logs and model checkpoints
 fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
+assert fp_dataset.exists()
 
 task: Literal["ESC", "NSC"] = "ESC"
 
