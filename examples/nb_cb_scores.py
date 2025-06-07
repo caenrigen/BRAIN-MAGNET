@@ -19,10 +19,8 @@
 # %autoreload all
 
 # %%
-import utils as ut
 import cnn_starr as cnn
 import data_module as dm
-import plot_utils as put
 import motif_discovery as md
 import notebook_helpers as nh
 from tqdm.auto import tqdm
@@ -85,11 +83,16 @@ len(dataloader)  # number of batches
 
 # %%
 random_state = 20240413
-num_shufs = 30
+# 10 works well enough (specialy if averaging with the reverse complement),
+# 30 if you want to be safe extra safe
+# Calculating the contribution scores for the full ~150k sequences takes:
+# num_shufs=10 --> ~1h
+# num_shufs=30 --> ~1.5h (~50% longer)
+num_shufs = 10
 num_folds = len(best_checkpoints)
 
-fp_out_inputs = dir_cb_score / f"{task}_{version}_input_seqs.npy"
-fp_out_shap_av = dir_cb_score / f"{task}_{version}_shap_vals.npy"
+fp_out_inputs = dir_cb_score / f"{task}_{version}_input_seqs_{num_shufs}shufs.npy"
+fp_out_shap_av = dir_cb_score / f"{task}_{version}_shap_vals_{num_shufs}shufs.npy"
 
 for fold, fp in tqdm(best_checkpoints.items()):
     sum_inplace = fold > 0
@@ -108,7 +111,9 @@ for fold, fp in tqdm(best_checkpoints.items()):
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,
-        avg_w_revcomp=True,
+        # avg_w_revcomp=True requires ~2x computation but it is likley to produce less
+        # noisy contributions scores.
+        avg_w_revcomp=False,
         tqdm_bar=True,
     )
     for inputs, shap_vals in gen:

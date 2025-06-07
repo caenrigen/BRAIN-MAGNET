@@ -65,8 +65,6 @@ def dinuc_shuffle(rng_seed: int, seq_1hot: np.ndarray):
 def make_shuffled_1hot_seqs(
     inp: List[torch.Tensor],
     device: torch.device,
-    # 10 works well enough, 30 if you want if you want to be safe extra safe,
-    # 100 is likely unnecessary
     num_shufs: int = 10,
     rng_seed: int = 20240413,
     # mp_context="fork" should be faster and consume less memory, but might not be
@@ -188,8 +186,8 @@ def calc_contrib_scores_step(
     Calculate the contribution scores for a batch of data.
 
     num_shufs: number of shuffled sequences to use as reference for the hypothetical
-    contributions scores. Suggested values: ~30-50 if avg_w_revcomp=True, ~100 if
-    avg_w_revcomp=False.
+    contributions scores. Suggested values: ~10 if `avg_w_revcomp=True`, else ~30.
+
     avg_w_revcomp: whether to average the contribution scores obtained from inputting
     both the "forward" and reverse complement strands.
     """
