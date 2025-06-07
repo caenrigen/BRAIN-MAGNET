@@ -29,7 +29,6 @@ import torch
 from tqdm.auto import tqdm
 
 # %%
-import utils as ut
 import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
@@ -93,7 +92,7 @@ seeds = [seed_a, seed_b]
 
 # Test some amounts of shuffled sequences to use as reference for
 # calculating hypothetical contribution scores
-num_shufs_list = [3, 10, 30, 50, 100, 200, 300, 500]
+num_shufs_list = [5, 10, 15, 20, 30, 50, 100, 200]
 
 model_trained, dataloader = load_model_and_full_dataloader(
     fp_checkpoint=fp_checkpoint,
