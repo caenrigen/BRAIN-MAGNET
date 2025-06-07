@@ -46,7 +46,7 @@ def one_hot_to_tensor_shape(one_hot: np.ndarray):
 MP_POOL: Dict[str, Optional[ProcessPoolExecutor]] = {"pool": None}
 
 
-def dinuc_shuffle(seq_1hot: np.ndarray, rng_seed: int):
+def dinuc_shuffle(rng_seed: int, seq_1hot: np.ndarray):
     # With the implementation of dinuc_shuffle used here, if not unpadded,
     # the shuffled sequences will "move" into the padded region,
     # since we are not experts on the SHAP DeepExplainer code, we stay safe and unpad
@@ -64,14 +64,15 @@ def dinuc_shuffle(seq_1hot: np.ndarray, rng_seed: int):
 
 def make_shuffled_1hot_seqs(
     inp: List[torch.Tensor],
-    # Accoriding to Avanti Shrikumar:
-    # 10 should already work well, 100 is on the high side
     device: torch.device,
-    num_shufs: int = 30,
+    # 10 works well enough, 30 if you want if you want to be safe extra safe,
+    # 100 is likely unnecessary
+    num_shufs: int = 10,
     rng_seed: int = 20240413,
     # mp_context="fork" should be faster and consume less memory, but might not be
     # supported on all platforms.
     mp_context: str = "fork",
+    use_multiprocessing: bool = True,
 ):
     # Assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
@@ -85,12 +86,15 @@ def make_shuffled_1hot_seqs(
 
     # dinuc_shuffle expects (length x 4) for a one-hot encoded sequence
     seq_1hot = tensor_to_onehot(inp[0])
-    seqs = [seq_1hot] * num_shufs
-    seeds = [rng_seed] * num_shufs
     # Create and keep a pool of workers for shuffling. Gives a significant speedup.
     if MP_POOL["pool"] is None:
         MP_POOL["pool"] = ProcessPoolExecutor(mp_context=mp.get_context(mp_context))
-    shufs = MP_POOL["pool"].map(dinuc_shuffle, seqs, seeds)
+    # Pass the sequence to each subprocess only once, sending a seed is faster
+    func = partial(dinuc_shuffle, seq_1hot=seq_1hot)
+    if use_multiprocessing:
+        shufs = MP_POOL["pool"].map(func, (rng_seed for _ in range(num_shufs)))
+    else:
+        shufs = [func(rng_seed) for _ in range(num_shufs)]
     # Putting this data to a device != "cpu" is futile and likely add overhead,
     # but the deep_pytorch code is spaghetti and won't work otherwise
     to_return = torch.tensor(np.array(list(shufs), dtype=np.float32), device=device)
@@ -175,9 +179,10 @@ def calc_contrib_scores_step(
     model_trained: cnn.BrainMagnetCNN,
     device: torch.device,
     random_state: int = 20240413,
-    num_shufs: int = 30,
+    num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     mp_context: str = "fork",
+    use_multiprocessing: bool = True,
 ):
     """
     Calculate the contribution scores for a batch of data.
@@ -208,6 +213,7 @@ def calc_contrib_scores_step(
             num_shufs=num_shufs,
             rng_seed=random_state,
             mp_context=mp_context,
+            use_multiprocessing=use_multiprocessing,
         ),
         combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
     )
@@ -245,10 +251,11 @@ def calc_contrib_scores(
     seq_len: Optional[int] = None,
     num_seqs: Optional[int] = None,
     random_state: int = 20240413,
-    num_shufs: int = 30,
+    num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     tqdm_bar: bool = True,
     mp_context: str = "fork",
+    use_multiprocessing: bool = True,
 ):
     """
     A generator that yields the inputs and shap values for each batch in the dataloader.
@@ -304,6 +311,7 @@ def calc_contrib_scores(
             num_shufs=num_shufs,
             avg_w_revcomp=avg_w_revcomp,
             mp_context=mp_context,
+            use_multiprocessing=use_multiprocessing,
         )
 
         if fp_out_inputs is not None:
@@ -331,10 +339,11 @@ def calc_contrib_scores_concatenated(
     model_trained: cnn.BrainMagnetCNN,
     device: torch.device,
     random_state: int = 20240413,
-    num_shufs: int = 30,
+    num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     tqdm_bar: bool = True,
     mp_context: str = "fork",
+    use_multiprocessing: bool = True,
 ):
     """
     Convenience function that concatenates the inputs and shap values from the generator
@@ -351,6 +360,7 @@ def calc_contrib_scores_concatenated(
         avg_w_revcomp=avg_w_revcomp,
         tqdm_bar=tqdm_bar,
         mp_context=mp_context,
+        use_multiprocessing=use_multiprocessing,
     )
     inputs, shap_vals = zip(*gen)
     inputs = np.concatenate(inputs)
