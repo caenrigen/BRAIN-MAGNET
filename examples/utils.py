@@ -34,31 +34,40 @@ def make_version(fold: Optional[int] = None, version: Optional[str] = None):
 
 
 def to_uint8(seq: str):
-    return np.frombuffer(seq.encode("ascii"), dtype=np.uint8)
+    return np.frombuffer(seq.encode(), dtype=np.uint8)
 
 
-# function to convert only one piece of sequence to np.array
-def make_one_hot_encode(alphabet: str = "ACGT", dtype=np.uint8) -> np.ndarray:
+DNA_ALPHABET = "ACGT"
+
+
+def make_one_hot_encoded_alphabet(
+    alphabet: str = DNA_ALPHABET, dtype=np.uint8
+) -> np.ndarray:
     """
     One-hot encode for a sequence.
     A -> [1,0,0,0]
     C -> [0,1,0,0]
     G -> [0,0,1,0]
     T -> [0,0,0,1]
-    N -> [0,0,0,0] (or any other character)
+    N -> [0,0,0,0] (any other character)
     """
-    hash_table = np.zeros((np.iinfo(np.uint8).max, len(alphabet)), dtype=dtype)
-    hash_table[to_uint8(alphabet)] = np.eye(len(alphabet), dtype=dtype)
-    return hash_table
+    one_hot_alphabet = np.zeros((np.iinfo(np.uint8).max, len(alphabet)), dtype=dtype)
+    one_hot_alphabet[to_uint8(alphabet)] = np.eye(len(alphabet), dtype=dtype)
+    return one_hot_alphabet
 
 
-HASH_TABLE = make_one_hot_encode()
+ONE_HOT_ENCODED_ALPHABET = make_one_hot_encoded_alphabet()
 
 
 def one_hot_encode(
-    sequence: str, pad_to: Optional[int] = None, transpose: bool = False
+    sequence: str,
+    pad_to: Optional[int] = None,
+    transpose: bool = False,
+    validate: bool = True,
 ):
-    one_hot = HASH_TABLE[to_uint8(sequence)]
+    if validate:
+        assert sequence.isupper(), f"{sequence.isupper() = !r}, {sequence = !r}"
+    one_hot = ONE_HOT_ENCODED_ALPHABET[to_uint8(sequence)]
     if pad_to is not None:
         one_hot = pad_one_hot(one_hot, to=pad_to)
     if transpose:
@@ -66,13 +75,25 @@ def one_hot_encode(
     return one_hot
 
 
-def pad_one_hot(one_hot: np.ndarray, to: int):
+DNA_ALPHABET_UINT8 = to_uint8(DNA_ALPHABET)
+
+
+def one_hot_decode(one_hot: np.ndarray, validate: bool = True):
+    """Decode a one-hot encoded sequence."""
+    if validate:
+        assert one_hot.ndim == 2, one_hot.shape
+        assert one_hot.shape[1] == len(DNA_ALPHABET_UINT8), one_hot.shape
+        assert np.all(one_hot.sum(axis=1) == 1), "all rows must sum to 1, maybe padded?"
+    return DNA_ALPHABET_UINT8[np.argmax(one_hot, axis=-1)].tobytes().decode()
+
+
+def pad_one_hot(one_hot: np.ndarray, to: int, alphabet_len: int = len(DNA_ALPHABET)):
     """
     You might want to pad to 1024 because certain neural network layers have not been
     implemented for lengths that are not powers of 2 on all types of devices (e.g.
     Apple MPS). For the simplified model we used, it is not necessary.
     """
-    assert one_hot.ndim == 2 and one_hot.shape[1] == 4, one_hot.shape
+    assert one_hot.ndim == 2 and one_hot.shape[1] == alphabet_len, one_hot.shape
     assert len(one_hot) <= to, len(one_hot)
     if len(one_hot) == to:
         return one_hot
@@ -166,7 +187,7 @@ def run_tests():
     seq = "ACCAGCT"
     assert len(seq) % 2 == 1  # odd length since it is more tricky to handle
 
-    seq_revcomp = seq.translate(str.maketrans("ACGT", "TGCA"))[::-1]
+    seq_revcomp = seq.translate(str.maketrans(DNA_ALPHABET, DNA_ALPHABET[::-1]))[::-1]
 
     one_hot = one_hot_encode(seq, pad_to=10)
     assert one_hot.shape == (10, 4)
