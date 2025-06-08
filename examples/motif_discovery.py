@@ -1,29 +1,20 @@
 from functools import partial
 from itertools import tee
-import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 import numpy as np
 from numpy.lib.format import open_memmap
 import warnings
 import torch
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
-from concurrent.futures import ProcessPoolExecutor
+from dinuc_shuf import shuffle  # a fast implementation of dinucleotide shuffling
 
 # Original repo:
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
 # Mirror over here with a fix to support latest ipython>=9 without import errors
 # https://github.com/caenrigen/shap/commit/53bf2b05a04e1a49cb398bc92b4e541860af0276
 import shap
-
-# Original repo:
-# https://github.com/kundajelab/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
-# Mirror over here:
-# https://github.com/caenrigen/deeplift/commit/0201a218965a263b9dd353099feacbb6f6db0051
-# We only use the dinuc_shuffle module from deeplift to generate the shuffled sequences.
-# The shuffled sequences are necessary to estimate the hypothetical contributions scores.
-import deeplift.dinuc_shuffle as ds
 
 import utils as ut
 import cnn_starr as cnn
@@ -40,26 +31,12 @@ def tensor_to_onehot(t):
 
 
 def one_hot_to_tensor_shape(one_hot: np.ndarray):
-    return one_hot.transpose(1, 0)
-
-
-MP_POOL: Dict[str, Optional[ProcessPoolExecutor]] = {"pool": None}
-
-
-def dinuc_shuffle(rng_seed: int, seq_1hot: np.ndarray):
-    # With the implementation of dinuc_shuffle used here, if not unpadded,
-    # the shuffled sequences will "move" into the padded region,
-    # since we are not experts on the SHAP DeepExplainer code, we stay safe and unpad
-    # before shuffling. Note that the shuffled sequences are not really passed through
-    # the model. These are used only for hypothetical contributions estimate.
-    seq = ut.unpad_one_hot(seq_1hot)
-    # Pad back to the original length
-    seq_shuf_padded = ut.pad_one_hot(
-        # Outputs a single shuffle, same shape as the input
-        ds.dinuc_shuffle(seq, rng=np.random.RandomState(rng_seed)),  # type: ignore
-        to=seq_1hot.shape[0],
-    )
-    return one_hot_to_tensor_shape(seq_shuf_padded)
+    if one_hot.ndim == 2:
+        return one_hot.transpose(1, 0)
+    elif one_hot.ndim == 3:
+        return one_hot.transpose(0, 2, 1)
+    else:
+        raise NotImplementedError(f"{one_hot.ndim = }")
 
 
 def make_shuffled_1hot_seqs(
@@ -67,10 +44,6 @@ def make_shuffled_1hot_seqs(
     device: torch.device,
     num_shufs: int = 10,
     rng_seed: int = 20240413,
-    # mp_context="fork" should be faster and consume less memory, but might not be
-    # supported on all platforms.
-    mp_context: str = "fork",
-    use_multiprocessing: bool = True,
 ):
     # Assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
@@ -84,18 +57,24 @@ def make_shuffled_1hot_seqs(
 
     # dinuc_shuffle expects (length x 4) for a one-hot encoded sequence
     seq_1hot = tensor_to_onehot(inp[0])
-    # Create and keep a pool of workers for shuffling. Gives a significant speedup.
-    if MP_POOL["pool"] is None:
-        MP_POOL["pool"] = ProcessPoolExecutor(mp_context=mp.get_context(mp_context))
-    # Pass the sequence to each subprocess only once, sending a seed is faster
-    func = partial(dinuc_shuffle, seq_1hot=seq_1hot)
-    if use_multiprocessing:
-        shufs = MP_POOL["pool"].map(func, (rng_seed for _ in range(num_shufs)))
-    else:
-        shufs = [func(rng_seed) for _ in range(num_shufs)]
-    # Putting this data to a device != "cpu" is futile and likely add overhead,
-    # but the deep_pytorch code is spaghetti and won't work otherwise
-    to_return = torch.tensor(np.array(list(shufs), dtype=np.float32), device=device)
+
+    # With the implementation of dinuc_shuffle used here, if not unpadded,
+    # the shuffled sequences will "move" into the padded region,
+    # since we are not experts on the SHAP DeepExplainer code, we stay safe and unpad
+    # before shuffling. The shuffled sequences are not passed through the model.
+    # These are used only for estimating hypothetical contributions.
+    # `np.tile` is used to repeat the sequence `num_shufs` times, to obey the shape
+    # expected by `dinuc_shuffle.shuffle`.
+    unpadded_tiled = np.tile(ut.unpad_one_hot(seq_1hot), (num_shufs, 1, 1))
+    shufs = shuffle(unpadded_tiled, rng=np.random.default_rng(rng_seed), verify=True)
+    seqs_shuffled_padded = ut.pad_one_hot(shufs, to=seq_1hot.shape[-2])
+    # Moving this data to a device != "cpu" is futile and likely add overhead,
+    # but the shap's deep_pytorch module is spaghetti and won't work otherwise
+    to_return = torch.tensor(
+        one_hot_to_tensor_shape(seqs_shuffled_padded),
+        device=device,
+        dtype=torch.float32,
+    )
     return to_return
 
 
@@ -118,12 +97,12 @@ def combine_multipliers_and_diff_from_ref(
     bg_data_ = bg_data[0]
 
     # Perform transposing because the code was designed for inputs that are in the
-    # format (length x 4)
-    # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
+    # format (seq_len x 4)
+    # List[(num_shufs, 4, seq_len)] -> List[(num_shufs, seq_len, 4)]
     mult_ = mult_.transpose(0, 2, 1)
-    # List[(num_shufs, 4, N)] -> List[(num_shufs, N, 4)]
+    # List[(num_shufs, 4, seq_len)] -> List[(num_shufs, seq_len, 4)]
     bg_data_ = bg_data_.transpose(0, 2, 1)
-    # List[(4, N)] -> List[(N, 4)]
+    # List[(4, seq_len)] -> List[(seq_len, 4)]
     orig_inp_ = orig_inp_.transpose(1, 0)
 
     len_one_hot, num_bp = 4, orig_inp_.shape[0]
@@ -179,8 +158,6 @@ def calc_contrib_scores_step(
     random_state: int = 20240413,
     num_shufs: int = 10,
     avg_w_revcomp: bool = True,
-    mp_context: str = "fork",
-    use_multiprocessing: bool = True,
 ):
     """
     Calculate the contribution scores for a batch of data.
@@ -210,8 +187,6 @@ def calc_contrib_scores_step(
             device=device,
             num_shufs=num_shufs,
             rng_seed=random_state,
-            mp_context=mp_context,
-            use_multiprocessing=use_multiprocessing,
         ),
         combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
     )
@@ -230,9 +205,7 @@ def calc_contrib_scores_step(
         shap_vals += ut.one_hot_reverse_complement(shap_vals_revcomp)
         shap_vals /= 2  # average
 
-    # Convert to int8 to save memory, one-hot values are simply 0s or 1s
-    inputs = inputs.detach().cpu().numpy().astype(np.int8)
-    return inputs, shap_vals
+    return inputs.detach(), shap_vals
 
 
 def calc_contrib_scores(
@@ -252,8 +225,6 @@ def calc_contrib_scores(
     num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     tqdm_bar: bool = True,
-    mp_context: str = "fork",
-    use_multiprocessing: bool = True,
 ):
     """
     A generator that yields the inputs and shap values for each batch in the dataloader.
@@ -308,11 +279,12 @@ def calc_contrib_scores(
             random_state=random_state,
             num_shufs=num_shufs,
             avg_w_revcomp=avg_w_revcomp,
-            mp_context=mp_context,
-            use_multiprocessing=use_multiprocessing,
         )
 
         if fp_out_inputs is not None:
+            # ! .cpu() is often a costly operation
+            # Convert to int8 to save disk space, one-hot values are simply 0s or 1s
+            inputs = inputs.cpu().numpy().astype(np.int8)
             npy_inputs[offset : offset + len(inputs)] = inputs
 
         if fp_out_shap is not None:
@@ -340,8 +312,6 @@ def calc_contrib_scores_concatenated(
     num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     tqdm_bar: bool = True,
-    mp_context: str = "fork",
-    use_multiprocessing: bool = True,
 ):
     """
     Convenience function that concatenates the inputs and shap values from the generator
@@ -357,10 +327,10 @@ def calc_contrib_scores_concatenated(
         num_shufs=num_shufs,
         avg_w_revcomp=avg_w_revcomp,
         tqdm_bar=tqdm_bar,
-        mp_context=mp_context,
-        use_multiprocessing=use_multiprocessing,
+        fp_out_shap=None,
+        fp_out_inputs=None,
     )
     inputs, shap_vals = zip(*gen)
-    inputs = np.concatenate(inputs)
+    inputs = torch.cat(inputs)
     shap_vals = np.concatenate(shap_vals)
     return inputs, shap_vals

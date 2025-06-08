@@ -51,6 +51,7 @@ device = torch.device("mps")
 task, version = ("ESC", "8a6b9616")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
+best_checkpoints
 
 # %%
 # Set to an integer to use a small sample of the dataset, the first `sample` sequences
@@ -113,7 +114,7 @@ for fold, fp in tqdm(best_checkpoints.items()):
         num_shufs=num_shufs,
         # avg_w_revcomp=True requires ~2x computation but it is likley to produce less
         # noisy contributions scores.
-        avg_w_revcomp=False,
+        avg_w_revcomp=True,
         tqdm_bar=True,
     )
     for inputs, shap_vals in gen:

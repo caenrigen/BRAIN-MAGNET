@@ -89,17 +89,21 @@ def one_hot_decode(one_hot: np.ndarray, validate: bool = True):
 
 def pad_one_hot(one_hot: np.ndarray, to: int, alphabet_len: int = len(DNA_ALPHABET)):
     """
-    You might want to pad to 1024 because certain neural network layers have not been
-    implemented for lengths that are not powers of 2 on all types of devices (e.g.
-    Apple MPS). For the simplified model we used, it is not necessary.
+    Pad a one-hot encoded sequence to a given length `to`.
+    Works for a single one-hot encoded sequence or a batch of one-hot encoded
+    sequences.
+    Expects shapes (seqs_len, alphabet_len) or (batch_size, seqs_len, alphabet_len).
     """
-    assert one_hot.ndim == 2 and one_hot.shape[1] == alphabet_len, one_hot.shape
-    assert len(one_hot) <= to, len(one_hot)
-    if len(one_hot) == to:
+    assert one_hot.ndim >= 2 and one_hot.shape[-1] == alphabet_len, one_hot.shape
+    assert one_hot.shape[-2] <= to, one_hot.shape
+    if one_hot.shape[-2] == to:
         return one_hot
-    arr_len = len(one_hot)
+    arr_len = one_hot.shape[-2]
     pad = (to - arr_len) / 2
-    return np.pad(one_hot, [(int(pad), int(np.ceil(pad))), (0, 0)], mode="constant")
+    pad_width = [(int(pad), int(np.ceil(pad))), (0, 0)]
+    if one_hot.ndim > 2:
+        pad_width = (one_hot.ndim - 2) * [(0, 0)] + pad_width
+    return np.pad(one_hot, pad_width, mode="constant")
 
 
 def unpad_one_hot(one_hot: np.ndarray, acgt_axis: Literal[0, 1] = 1):
