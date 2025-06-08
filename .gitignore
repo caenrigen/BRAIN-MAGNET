@@ -10,3 +10,5 @@ desktop.ini
 *.egg-info/
 *.pyc
 __pycache__
+# code profiling results
+*.prof
