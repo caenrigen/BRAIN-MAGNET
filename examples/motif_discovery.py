@@ -118,20 +118,10 @@ def combine_multipliers_and_diff_from_ref(
     # Iterate over 4 hypothetical sequences, each made of the same base,
     # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
     for idx_col_1hot in range(len_one_hot):
-        # ##########################################################################
-        # These two lines allocate extra memory
-        # // hyp_seq_1hot = np.zeros_like(orig_inp0, dtype=np.float32)
-        # // hyp_seq_1hot[:, idx_col_1hot] = 1.0
-        # This trick avoids memory allocation
-        hyp_seq_1hot = np.broadcast_to(ident[idx_col_1hot], (num_bp, 4))
-        # ##########################################################################
-
-        # `hyp_seq_1hot[None, :, :]` shapes it such that it can match the
-        # shape of `bg_data` that has the extra dimension of num_shufs.
-        # It is only a view of the underlying memory, so it is efficient.
-        np.subtract(hyp_seq_1hot[None, :, :], bg_data_, out=hyp_contribs)
-        np.multiply(hyp_contribs, mult_, out=hyp_contribs)
-
+        # Tile and add an extra dimension to match the shape of `bg_data`
+        hyp_seq_1hot = np.tile(ident[idx_col_1hot], (1, num_bp, 1))
+        np.subtract(hyp_seq_1hot, bg_data_, out=hyp_contribs)
+        hyp_contribs *= mult_
         # Sum on the one-hot axis, save directly to `projected_hyp_contribs`.
         # The sum is to get the total hypothetical contribution (at that bp)
         hyp_contribs.sum(axis=-1, out=projected_hyp_contribs[:, :, idx_col_1hot])
@@ -280,11 +270,10 @@ def calc_contrib_scores(
             num_shufs=num_shufs,
             avg_w_revcomp=avg_w_revcomp,
         )
+        # Move to CPU to yield consistent types for both inputs and shap_vals
+        inputs = inputs.cpu().numpy().astype(np.int8)
 
         if fp_out_inputs is not None:
-            # ! .cpu() is often a costly operation
-            # Convert to int8 to save disk space, one-hot values are simply 0s or 1s
-            inputs = inputs.cpu().numpy().astype(np.int8)
             npy_inputs[offset : offset + len(inputs)] = inputs
 
         if fp_out_shap is not None:
@@ -331,6 +320,6 @@ def calc_contrib_scores_concatenated(
         fp_out_inputs=None,
     )
     inputs, shap_vals = zip(*gen)
-    inputs = torch.cat(inputs)
+    inputs = np.concatenate(inputs)
     shap_vals = np.concatenate(shap_vals)
     return inputs, shap_vals
