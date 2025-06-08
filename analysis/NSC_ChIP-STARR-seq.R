@@ -71,7 +71,7 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 options(scipen = 999)
 
 # setwd("/Users/Ruizhi/Work/EMC/Papers/ChIP-STARR-seq NSC/Scripts/")
-setwd("/Volumes/Famafia/brain-magnet")
+setwd("../examples/data")
 
 # # Figures
 
