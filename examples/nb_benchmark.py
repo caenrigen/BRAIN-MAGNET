@@ -28,7 +28,6 @@ from itertools import combinations
 # %aimport utils, cnn_starr, data_module, plot_utils, notebook_helpers
 
 import utils as ut
-import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
 import notebook_helpers as nh

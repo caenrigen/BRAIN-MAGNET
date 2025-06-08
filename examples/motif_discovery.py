@@ -8,7 +8,9 @@ import warnings
 import torch
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
-from dinuc_shuf import shuffle  # a fast implementation of dinucleotide shuffling
+
+# A fast implementation of dinucleotide shuffling
+from dinuc_shuf import shuffle as dinuc_shuf_seqs
 
 # Original repo:
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
@@ -27,10 +29,12 @@ dpyt.op_handler["Flatten"] = dpyt.passthrough
 
 def tensor_to_onehot(t):
     # Detach is because we won't need the gradients
+    assert t.ndim == 2, f"{t.ndim = } != 2"
     return t.detach().transpose(1, 0).cpu().numpy()
 
 
 def one_hot_to_tensor_shape(one_hot: np.ndarray):
+    assert one_hot.ndim in (2, 3), f"{one_hot.ndim = } not in (2, 3)"
     if one_hot.ndim == 2:
         return one_hot.transpose(1, 0)
     elif one_hot.ndim == 3:
@@ -66,7 +70,20 @@ def make_shuffled_1hot_seqs(
     # `np.tile` is used to repeat the sequence `num_shufs` times, to obey the shape
     # expected by `dinuc_shuffle.shuffle`.
     unpadded_tiled = np.tile(ut.unpad_one_hot(seq_1hot), (num_shufs, 1, 1))
-    shufs = shuffle(unpadded_tiled, rng=np.random.default_rng(rng_seed), verify=True)
+    # `dinuc_shuf_seqs` returns dtype=np.uint8
+    shufs = dinuc_shuf_seqs(
+        unpadded_tiled,
+        rng=np.random.default_rng(rng_seed),
+        # `verify=False` avoids performing the sum == 1 check on the one-hot axis.
+        # This should give a little performance boost.
+        # ! We also need this because 2 of the sequences in the BRAIN-MAGNET dataset
+        # ! have a few 'N's in the DNA sequence, which will cause `verify=True` to fail.
+        # ! When empty rows in the one-hot encoded sequences are passed, the behavior
+        # ! of the function is undefined. From trying it out, it seems to approximately
+        # ! preserve the nucleotide frequency BUT assume some value for the 'N's. In the
+        # ! 2 examples tested, it added A's and C's to the shuffled sequences.
+        verify=False,
+    )
     seqs_shuffled_padded = ut.pad_one_hot(shufs, to=seq_1hot.shape[-2])
     # Moving this data to a device != "cpu" is futile and likely add overhead,
     # but the shap's deep_pytorch module is spaghetti and won't work otherwise
@@ -110,11 +127,13 @@ def combine_multipliers_and_diff_from_ref(
     assert orig_inp_.ndim == 2, orig_inp_.shape
     assert orig_inp_.shape[-1] == len_one_hot, orig_inp_.shape
 
-    # We don't need zeros, these will be overwritten
-    projected_hyp_contribs = np.empty_like(bg_data_, dtype=np.float32)
-    hyp_contribs = np.empty_like(bg_data_, dtype=np.float32)
+    # We don't need zeros, these will be overwritten.
+    # It might give a little speed up to perform calculations using the native
+    # dtype=np.float64, and only cast to float32 at the end.
+    projected_hyp_contribs = np.empty_like(bg_data_, dtype=np.float64)
+    hyp_contribs = np.empty_like(bg_data_, dtype=np.float64)
 
-    ident = np.eye(len_one_hot, dtype=np.float32)
+    ident = np.eye(len_one_hot, dtype=np.float64)
     # Iterate over 4 hypothetical sequences, each made of the same base,
     # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
     for idx_col_1hot in range(len_one_hot):
@@ -128,8 +147,10 @@ def combine_multipliers_and_diff_from_ref(
 
     # Average on the num_shufs axis to arrive to the final hypothetical
     # contribution scores (at each bp).
-    p_h_cbs_mean = one_hot_to_tensor_shape(projected_hyp_contribs.mean(axis=0))
-    return [torch.tensor(p_h_cbs_mean)]
+    p_h_cbs_mean = one_hot_to_tensor_shape(
+        projected_hyp_contribs.mean(axis=0, dtype=np.float64)
+    )
+    return [torch.tensor(p_h_cbs_mean, dtype=torch.float32)]
 
 
 # Silence an warning that is not relevant for this code
