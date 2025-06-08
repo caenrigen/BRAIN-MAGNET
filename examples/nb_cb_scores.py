@@ -48,7 +48,8 @@ device = torch.device("mps")
 #
 
 # %%
-task, version = ("ESC", "8a6b9616")
+# We use k-folds models trained with 0% test set to maximize model's knowledge
+task, version = ("ESC", "406e4cea")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
 best_checkpoints
@@ -79,20 +80,30 @@ len(dataloader)  # number of batches
 #
 
 # %% [markdown]
-# ⚠️ Runnning `calc_contrib_scores` on the full dataset can take ~2 hours.
+# ⏳ Running `calc_contrib_scores` takes ~1h for this configuration:
+#
+# - full dataset
+# - 1 model takes ~1h
+# - `avg_w_revcomp=True`
+# - `num_shufs = 10`
+# - GPU: Apple M1 Pro
 #
 
 # %%
 random_state = 20240413
-# 10 works well enough (specialy if averaging with the reverse complement),
-# 30 if you want to be safe extra safe
+avg_w_revcomp = True
+# 10 works well enough (specially if averaging with the reverse complement),
+# 30 if you want to be extra safe
 # Calculating the contribution scores for the full ~150k sequences takes:
 # num_shufs=10 --> ~1h
 # num_shufs=30 --> ~1.5h (~50% longer)
+# We are averaging with the reverse complement and with scores from k-folds models,
+# 10 shuffles should be more than enough.
 num_shufs = 10
 num_folds = len(best_checkpoints)
 
-fp_out_inputs = dir_cb_score / f"{task}_{version}_input_seqs_{num_shufs}shufs.npy"
+# The dataloader already writes the inputs to disk. So we skip duplicating the file.
+fp_out_inputs = None
 fp_out_shap_av = dir_cb_score / f"{task}_{version}_shap_vals_{num_shufs}shufs.npy"
 
 for fold, fp in tqdm(best_checkpoints.items()):
@@ -112,11 +123,12 @@ for fold, fp in tqdm(best_checkpoints.items()):
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,
-        # avg_w_revcomp=True requires ~2x computation but it is likley to produce less
+        # avg_w_revcomp=True requires ~2x computation but it is likely to produce less
         # noisy contributions scores.
-        avg_w_revcomp=True,
+        avg_w_revcomp=avg_w_revcomp,
         tqdm_bar=True,
     )
+    # Consume the generator
     for inputs, shap_vals in gen:
         # we are writing to disk, so we don't need to keep the data in memory
         del inputs, shap_vals
