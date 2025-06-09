@@ -1,3 +1,9 @@
+"""
+The code in this module is based on the example notebook in the Kundaje's lab SHAP fork:
+https://github.com/kundajelab/shap/blob/master/notebooks/deep_explainer/PyTorch%20Deep%20Explainer%20Genomics%20example%20With%20Hypothetical%20Importance%20Scores.ipynb
+Namely the `combine_multipliers_and_diff_from_ref` function.
+"""
+
 from functools import partial
 from itertools import tee
 from pathlib import Path
@@ -9,7 +15,7 @@ import torch
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 
-# A fast implementation of dinucleotide shuffling, available on pypi.org
+# A fast implementation of the dinucleotide shuffling, available on pypi.org
 # Github: https://github.com/austintwang/dinuc_shuf
 # Mirror: https://github.com/caenrigen/dinuc_shuf
 from dinuc_shuf import shuffle as dinuc_shuf_seqs
