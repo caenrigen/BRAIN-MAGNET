@@ -145,10 +145,15 @@ def one_hot_reverse_complement(one_hot: Union[np.ndarray, torch.Tensor]):
 
 def sequences_str_to_1hot(
     sequences: Sequence[str],
-    pad_to: int = 1000,
+    pad_to: Optional[int] = 1000,
+    # transpose=True shapes it as a tensor batch (batch_size, channels=4, num_bp)
     transpose: bool = True,
 ):
-    """Transpose to match how pytorch organizes data: (batch_size, channels=4, num_bp)"""
+    """
+    Convert string sequences to a one-hot encoded batch of numpy arrays.
+    The batch is ready to be converted to a tensor is `transpose=True`.
+    Set `pad_to=None` to not pad the sequences (sequences must have the same length).
+    """
     func = partial(one_hot_encode, pad_to=pad_to, transpose=transpose)
     return np.stack(list(map(func, sequences)), axis=0)
 
