@@ -19,17 +19,18 @@
 # %autoreload all
 
 # %%
-import cnn_starr as cnn
-import data_module as dm
-import deep_explainer as de
-import notebook_helpers as nh
-from tqdm.auto import tqdm
-
-# %%
 from typing import Optional
 from pathlib import Path
 import numpy as np
 import torch
+from tqdm.auto import tqdm
+
+# %%
+# local modules
+import cnn_starr as cnn
+import data_module as dm
+import deep_explainer as de
+import notebook_helpers as nh
 
 # %%
 dir_data = Path("./data")
@@ -49,8 +50,8 @@ device = torch.device("mps")
 
 # %%
 # We use k-folds models trained with 0% test set to maximize model's knowledge
-# task, version = ("ESC", "406e4cea")
-task, version = ("NSC", "b624b882")
+task, version = ("ESC", "cdb72439")
+# task, version = ("NSC", "b624b882")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
 best_checkpoints
@@ -93,17 +94,16 @@ len(dataloader)  # number of batches
 # %%
 random_state = 20240413
 avg_w_revcomp = True
-# 10 works well enough (specially if averaging with the reverse complement),
-# 30 if you want to be extra safe
+# 10 works well if averaging with the reverse complement,
+# 30 if you want to be extra safe.
 # Calculating the contribution scores for the full ~150k sequences takes:
 # num_shufs=10 --> ~1h
 # num_shufs=30 --> ~1.5h (~50% longer)
-# We are averaging with the reverse complement and with scores from k-folds models,
-# 10 shuffles should be more than enough.
-num_shufs = 10
+num_shufs = 30
 num_folds = len(best_checkpoints)
 
-# The dataloader already writes the inputs to disk. So we skip duplicating the file.
+# The dataloader already writes the inputs of the full dataset to disk.
+# So we can skip duplicating the file.
 fp_out_inputs = None
 fp_out_shap_av = dir_cb_score / f"{task}_{version}_shap_vals_{num_shufs}shufs.npy"
 
@@ -133,3 +133,5 @@ for fold, fp in tqdm(best_checkpoints.items()):
     for inputs, shap_vals in gen:
         # we are writing to disk, so we don't need to keep the data in memory
         del inputs, shap_vals
+
+# %%
