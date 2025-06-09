@@ -20,7 +20,8 @@ DATASET_COLS = (
     "Start",  # Start position in the chromosome
     "End",  # End position in the chromosome
     "Seq_len",  # Length of the sequence
-    "GC_counts",  # Number of G and C in the sequence
+    "GC_counts",  # Number of "G"s and "C"s in the sequence
+    "N_counts",  # Number of "N"s in the sequence
     "NSC_log2_enrichment",  # Log2 enrichment of NSC
     "ESC_log2_enrichment",  # Log2 enrichment of ESC
     "Seq",  # Sequence

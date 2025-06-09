@@ -39,7 +39,7 @@ def train(
     # We did not use workers, but we keep it here for future reference and reminder.
     L.seed_everything(random_state, workers=True)  # for reproducibility
 
-    model = cnn.BrainMagnetCNN(
+    model = cnn.ModelModule(
         learning_rate=learning_rate,
         # Don't change this for training, reverse complement is handled by the data
         # module as augmentation data.
@@ -149,7 +149,7 @@ def evaluate_model(
     augment_w_rev_comp: Optional[bool] = None,
     dataloader: str = "test_dataloader",
 ):
-    model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
+    model = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
 
     # Allow to override or use the value from training
     if augment_w_rev_comp is None:

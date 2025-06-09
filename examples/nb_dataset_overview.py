@@ -38,6 +38,13 @@ df_enrichment["Chr_id"] = df_enrichment.Chr.str.replace("chr", "")
 df_enrichment["GC_content"] = df_enrichment.GC_counts / df_enrichment.Seq_len
 df_enrichment
 
+# %% [markdown]
+# A few sequences in our dataset have `N`s in the human genome reference from which the sequences have been extracted.
+#
+
+# %%
+df_enrichment[df_enrichment.N_counts > 0]
+
 # %%
 _ = df_enrichment.Chr_id.value_counts().plot(kind="bar")
 ax = plt.gca()

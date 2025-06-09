@@ -166,7 +166,7 @@ warnings.filterwarnings(
 
 def calc_contrib_scores_step(
     data_batch: Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor],
-    model_trained: cnn.BrainMagnetCNN,
+    model_trained: cnn.ModelModule,
     device: torch.device,
     random_state: int = 20240413,
     num_shufs: int = 10,
@@ -223,7 +223,7 @@ def calc_contrib_scores_step(
 
 def calc_contrib_scores(
     dataloader: DataLoader,
-    model_trained: cnn.BrainMagnetCNN,
+    model_trained: cnn.ModelModule,
     device: torch.device,
     fp_out_shap: Optional[Path] = None,
     fp_out_inputs: Optional[Path] = None,
@@ -318,7 +318,7 @@ def calc_contrib_scores(
 
 def calc_contrib_scores_concatenated(
     dataloader: DataLoader,
-    model_trained: cnn.BrainMagnetCNN,
+    model_trained: cnn.ModelModule,
     device: torch.device,
     random_state: int = 20240413,
     num_shufs: int = 10,

@@ -59,7 +59,7 @@ df_enrichment.head()
 def load_model_and_full_dataloader(
     fp_checkpoint: Path, fp_dataset: Path, indices: np.ndarray
 ):
-    model = cnn.BrainMagnetCNN.load_from_checkpoint(fp_checkpoint)
+    model = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
         targets_col=f"{task}_log2_enrichment",
@@ -184,7 +184,7 @@ res = {}
 for fold, fp in tqdm(best_checkpoints.items()):
     inputs, shap_vals = md.calc_contrib_scores_concatenated(
         dataloader,
-        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
+        model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,
@@ -213,7 +213,7 @@ res = []
 for fold, fp in tqdm(best_checkpoints.items()):
     (input_seq_T, *_), (shap_val, *_) = md.calc_contrib_scores_concatenated(
         dataloader,
-        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
+        model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         device=device,
         random_state=random_state,
         num_shufs=num_shufs,

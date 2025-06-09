@@ -8,13 +8,51 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
 
-class BrainMagnetCNN(L.LightningModule):
+def make_model():
+    # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
+    # ! downstream SHAP analysis, i.e. motif discovery.
+    # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
+    # ! exist for such layers, there might caveats and performance issues.
+    return nn.Sequential(
+        nn.Conv1d(4, 16, kernel_size=15, padding="same"),
+        nn.BatchNorm1d(16),
+        nn.ReLU(),
+        nn.AvgPool1d(2),
+        nn.Conv1d(16, 16, kernel_size=13, padding="same"),
+        nn.BatchNorm1d(16),
+        nn.ReLU(),
+        nn.AvgPool1d(2),
+        nn.Conv1d(16, 16, kernel_size=11, padding="same"),
+        nn.BatchNorm1d(16),
+        nn.ReLU(),
+        nn.AvgPool1d(2),
+        # Using AdaptiveAvgPool1d to make the output of the CNN independent of the
+        # input length. And avoid parameters explosion on the linear layer.
+        nn.AdaptiveAvgPool1d(1),
+        nn.Flatten(),  # to be able to input into linear layer
+        nn.Linear(16, 16),
+        nn.BatchNorm1d(16),
+        nn.ReLU(),
+        # Dropout layer did not seem to be needed. The model is small and the
+        # BatchNorm1d is applying regularization and our dataset is relatively
+        # large providing significant data variety.
+        # nn.Dropout(1 / 16),
+        nn.Linear(16, 16),
+        nn.BatchNorm1d(16),
+        nn.ReLU(),
+        # nn.Dropout(1 / 16),
+        nn.Linear(16, 1),
+    )
+
+
+class ModelModule(L.LightningModule):
     def __init__(
         self,
         learning_rate: float = 0.01,
         weight_decay: float = 0.0,  # e.g. 1e-6
         forward_mode: Literal["forward", "reverse_complement", "mean"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
+        model: Optional[nn.Module] = None,
         **hyper_params,
     ):
         super().__init__()
@@ -40,40 +78,7 @@ class BrainMagnetCNN(L.LightningModule):
         # is more intuitive than the values of the MSE loss function.
         self.cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
 
-        # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
-        # ! downstream SHAP analysis, i.e. motif discovery.
-        # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
-        # ! exist for such layers, there might caveats and performance issues.
-        self.model = nn.Sequential(
-            nn.Conv1d(4, 16, kernel_size=15, padding="same"),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.AvgPool1d(2),
-            nn.Conv1d(16, 16, kernel_size=13, padding="same"),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.AvgPool1d(2),
-            nn.Conv1d(16, 16, kernel_size=11, padding="same"),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.AvgPool1d(2),
-            # Using AdaptiveAvgPool1d to make the output of the CNN independent of the
-            # input length. And avoid parameters explosion on the linear layer.
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),  # to be able to input into linear layer
-            nn.Linear(16, 16),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            # Dropout layer did not seem to be needed. The model is small and the
-            # BatchNorm1d is applying regularization and our dataset is relatively
-            # large providing significant data variety.
-            # nn.Dropout(1 / 16),
-            nn.Linear(16, 16),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            # nn.Dropout(1 / 16),
-            nn.Linear(16, 1),
-        )
+        self.model = model or make_model()
 
     def forward(self, x):
         if self.forward_mode == "forward":
@@ -156,7 +161,7 @@ class LogMetrics(L.Callback):
         self.tpearson: Optional[torch.Tensor] = None
         self.vpearson: Optional[torch.Tensor] = None
 
-    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: BrainMagnetCNN):
+    def on_train_epoch_end(self, trainer: L.Trainer, pl_module: ModelModule):
         """Gets called after validation epoch ends"""
         if trainer.sanity_checking:
             return

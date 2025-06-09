@@ -49,7 +49,8 @@ device = torch.device("mps")
 
 # %%
 # We use k-folds models trained with 0% test set to maximize model's knowledge
-task, version = ("ESC", "406e4cea")
+# task, version = ("ESC", "406e4cea")
+task, version = ("NSC", "b624b882")
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
 best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
 best_checkpoints
@@ -83,7 +84,7 @@ len(dataloader)  # number of batches
 # ⏳ Running `calc_contrib_scores` takes ~1h for this configuration:
 #
 # - full dataset
-# - 1 model takes ~1h
+# - 1 model
 # - `avg_w_revcomp=True`
 # - `num_shufs = 10`
 # - GPU: Apple M1 Pro
@@ -111,7 +112,7 @@ for fold, fp in tqdm(best_checkpoints.items()):
     div_after_sum = num_folds if fold == num_folds - 1 else None
     gen = md.calc_contrib_scores(
         dataloader=dataloader,
-        model_trained=cnn.BrainMagnetCNN.load_from_checkpoint(fp),
+        model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         fp_out_shap=fp_out_shap_av,
         # Only save inputs once
         fp_out_inputs=fp_out_inputs if fold == 0 else None,
