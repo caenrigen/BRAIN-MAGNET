@@ -21,7 +21,7 @@
 # %%
 import cnn_starr as cnn
 import data_module as dm
-import motif_discovery as md
+import deep_explainer as de
 import notebook_helpers as nh
 from tqdm.auto import tqdm
 
@@ -110,7 +110,7 @@ fp_out_shap_av = dir_cb_score / f"{task}_{version}_shap_vals_{num_shufs}shufs.np
 for fold, fp in tqdm(best_checkpoints.items()):
     sum_inplace = fold > 0
     div_after_sum = num_folds if fold == num_folds - 1 else None
-    gen = md.calc_contrib_scores(
+    gen = de.calc_contrib_scores(
         dataloader=dataloader,
         model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         fp_out_shap=fp_out_shap_av,

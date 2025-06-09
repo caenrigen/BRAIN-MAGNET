@@ -32,7 +32,7 @@ from tqdm.auto import tqdm
 import cnn_starr as cnn
 import data_module as dm
 import plot_utils as put
-import motif_discovery as md
+import deep_explainer as de
 import notebook_helpers as nh
 
 # %%
@@ -104,7 +104,7 @@ for avg_w_revcomp in [False, True]:
     for num_shufs in tqdm(num_shufs_list, desc=f"avg_w_revcomp={avg_w_revcomp}"):
         res = {}
         for seed in seeds:
-            inputs, shap_vals = md.calc_contrib_scores_concatenated(
+            inputs, shap_vals = de.calc_contrib_scores_concatenated(
                 dataloader,
                 model_trained=model_trained,
                 device=device,
@@ -182,7 +182,7 @@ version = "cc0e922b"
 pearson = {}
 res = {}
 for fold, fp in tqdm(best_checkpoints.items()):
-    inputs, shap_vals = md.calc_contrib_scores_concatenated(
+    inputs, shap_vals = de.calc_contrib_scores_concatenated(
         dataloader,
         model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         device=device,
@@ -211,7 +211,7 @@ pearson
 # %%
 res = []
 for fold, fp in tqdm(best_checkpoints.items()):
-    (input_seq_T, *_), (shap_val, *_) = md.calc_contrib_scores_concatenated(
+    (input_seq_T, *_), (shap_val, *_) = de.calc_contrib_scores_concatenated(
         dataloader,
         model_trained=cnn.ModelModule.load_from_checkpoint(fp),
         device=device,
