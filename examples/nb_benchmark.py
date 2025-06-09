@@ -14,6 +14,10 @@
 # ---
 
 # %%
+# %load_ext autoreload
+# %autoreload all
+
+# %%
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -23,10 +27,6 @@ import torch
 from itertools import combinations
 
 # %%
-# %load_ext autoreload
-# %autoreload explicit
-# %aimport utils, cnn_starr, data_module, plot_utils, notebook_helpers
-
 import utils as ut
 import data_module as dm
 import plot_utils as put

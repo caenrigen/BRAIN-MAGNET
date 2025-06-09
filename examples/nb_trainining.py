@@ -14,6 +14,10 @@
 # ---
 
 # %%
+# %load_ext autoreload
+# %autoreload all
+
+# %%
 from pathlib import Path
 from functools import partial
 from typing import Literal
@@ -22,10 +26,7 @@ import torch
 from tqdm.auto import tqdm
 
 # %%
-# %load_ext autoreload
-# %autoreload explicit
-# %aimport utils, cnn_starr, data_module, notebook_helpers
-
+# local modules
 import utils as ut
 import notebook_helpers as nh
 
@@ -34,6 +35,29 @@ import notebook_helpers as nh
 print(torch.cuda.is_available(), torch.backends.mps.is_available())
 device = torch.device("mps")  # mps/cuda/cpu
 device
+
+# %% [markdown]
+# To visualise the training progress in more detail run in a terminal:
+#
+# ```bash
+# tensorboard --logdir ./data/train
+# ```
+#
+# which should output something like:
+#
+# ```bash
+# Serving TensorBoard on localhost; to expose to the network, use a proxy or pass --bind_all
+# TensorBoard 2.19.0 at http://localhost:6006/ (Press CTRL+C to quit)
+# ```
+#
+# Open in the browser the URL printed by the command above, e.g. http://localhost:6006/.
+#
+# Explore the tabs for different visulizations:
+#
+# - http://localhost:6006/#scalars plots all the logged metrics
+# - http://localhost:6006/#custom_scalars plots both training and validation loss on the same figure
+# - http://localhost:6006/#hparams allows to compare between training runs (usually with different hyperparameters)
+#
 
 # %%
 dir_data = Path("./data")
@@ -51,7 +75,7 @@ task: Literal["ESC", "NSC"] = "ESC"
 # should be exactly the same.
 random_state = 20240413  # for reproducibility
 
-# We train for a fixed number of epochs and post select the best model(s)
+# We train for a fixed number of epochs and post select the best model
 max_epochs = 75
 
 batch_size = 256
