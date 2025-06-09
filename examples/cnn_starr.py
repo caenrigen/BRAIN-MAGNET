@@ -9,6 +9,11 @@ import utils as ut
 
 
 def make_model():
+    """
+    This is a simplified, smaller model that provides the same performance as the
+    original model reported in the paper.
+    Additionally, it accepts as input sequences of arbitrary length.
+    """
     # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
     # ! downstream SHAP analysis, i.e. motif discovery.
     # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
@@ -228,3 +233,37 @@ class LogMetrics(L.Callback):
 def pearson_correlation_estimate(predictions, targets, cos_sim: nn.CosineSimilarity):
     """Estimate Pearson correlation using cosine similarity."""
     return cos_sim(predictions - predictions.mean(), targets - targets.mean())
+
+
+def make_model_old():
+    """
+    This is the original model reported in the paper
+    https://www.medrxiv.org/content/10.1101/2024.04.13.24305761v2
+
+    The model above (`make_model`) is a simplified, much smaller, providing the
+    same performance and accepts as inputs sequences of arbitrary length.
+    """
+    return nn.Sequential(
+        nn.Conv1d(4, 128, 11, padding="same"),
+        nn.BatchNorm1d(128),
+        nn.ReLU(),
+        nn.MaxPool1d(2, 2),
+        nn.Conv1d(128, 256, 9, padding="same"),
+        nn.BatchNorm1d(256),
+        nn.ReLU(),
+        nn.MaxPool1d(2, 2),
+        nn.Conv1d(256, 512, 7, padding="same"),
+        nn.BatchNorm1d(512),
+        nn.ReLU(),
+        nn.MaxPool1d(2, 2),
+        nn.Flatten(),
+        nn.Linear(64000, 1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(1024, 1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(1024, 1),
+    )
