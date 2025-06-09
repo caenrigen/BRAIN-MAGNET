@@ -44,7 +44,7 @@ def train(
         # Don't change this for training, reverse complement is handled by the data
         # module as augmentation data.
         forward_mode="forward",
-        # The rest are hyperparameters for logging purposes.
+        # The rest are "hyperparameters" for logging purposes.
         task=task,
         batch_size=batch_size,
         frac_test=frac_test,
@@ -88,6 +88,8 @@ def train(
         fp_dataset=fp_dataset,
         random_state=random_state,
         augment_w_rev_comp=augment_w_rev_comp,
+        targets_col=f"{task}_log2_enrichment",
+        x_col="Seq",
         folds=folds or None,
         fold=fold,
         frac_test=frac_test,

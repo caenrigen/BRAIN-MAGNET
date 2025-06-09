@@ -109,8 +109,8 @@ class DataModule(L.LightningDataModule):
         self,
         fp_dataset: Union[Path, str],
         augment_w_rev_comp: bool,
+        targets_col: Union[Literal["ESC_log2_enrichment", "NSC_log2_enrichment"], str],
         x_col: str = "Seq",
-        targets_col: str = "ESC_log2_enrichment",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
         random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
