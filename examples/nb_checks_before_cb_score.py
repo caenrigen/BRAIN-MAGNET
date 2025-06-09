@@ -46,39 +46,31 @@ fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 device = torch.device("mps")
 
 # %%
+df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS_NO_SEQ)
+df_enrichment.head()
+
+# %%
 task, version = "ESC", "762acb33"
 fp_checkpoint = dir_train / f"{task}/{version}/checkpoints/epoch=014.ckpt"
 assert fp_checkpoint.exists()
 
 # %%
-df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS_NO_SEQ)
-df_enrichment.head()
-
-
-# %%
-def load_model_and_full_dataloader(
-    fp_checkpoint: Path, fp_dataset: Path, indices: np.ndarray
-):
-    model = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
-    datamodule = dm.DataModule(
-        fp_dataset=fp_dataset,
-        targets_col=f"{task}_log2_enrichment",
-        augment_w_rev_comp=False,
-        batch_size=256,
-    )
-    datamodule.setup()
-    # `datamodule.DataLoader` is based on a partial function, we only need to pass
-    # the indices to the sampler
-    dataloader = datamodule.DataLoader(datamodule.dataset, sampler=indices)
-    return model, dataloader
-
-
-# %%
-sample_size = 10  # small sample for some fast estimates, shap is pretty slow
+sample_size = 30  # small sample for some fast estimates, shap is pretty slow
 targets = df_enrichment[f"{task}_log2_enrichment"]
 top_targets = targets.sort_values(ascending=False)[:sample_size]
 idxs_sample = top_targets.index.to_numpy()
-top_targets
+
+# %%
+datamodule = dm.DataModule(
+    fp_dataset=fp_dataset,
+    targets_col=f"{task}_log2_enrichment",
+    augment_w_rev_comp=False,
+    batch_size=256,
+)
+datamodule.setup()
+# `datamodule.DataLoader` is based on a partial function, we only need to pass
+# the indices to the sampler
+dataloader = datamodule.DataLoader(datamodule.dataset, sampler=idxs_sample)
 
 # %% [markdown]
 # # Impact of averaging with rev. compl. and the number of shuffles
@@ -94,11 +86,8 @@ seeds = [seed_a, seed_b]
 # calculating hypothetical contribution scores
 num_shufs_list = [5, 10, 15, 20, 30, 50, 100, 200]
 
-model_trained, dataloader = load_model_and_full_dataloader(
-    fp_checkpoint=fp_checkpoint,
-    fp_dataset=fp_dataset,
-    indices=idxs_sample,
-)
+model_trained = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
+
 pearson = {False: {}, True: {}}
 for avg_w_revcomp in [False, True]:
     for num_shufs in tqdm(num_shufs_list, desc=f"avg_w_revcomp={avg_w_revcomp}"):
@@ -150,11 +139,11 @@ _ = ax.legend()
 #
 # If **not** averaging with the reverse complement:
 #
-# - 100 shuffles is a solid amount for achieving very high correlation (~98%).
-# - 30 shuffles is fairly good for quicker computation without big compromise (~90-95% correlation).
+# - 100 shuffles achieve very high correlation (~98%).
+# - 30 shuffles is good without big compromise (~90-95% correlation).
 # - 10 shuffles seems a bit low with "only" ~80-85% correlation.
 #
-# If averaging with reverse complement (requires x2 GPU computation and <= x2 CPU computation):
+# If averaging with reverse complement (requires ~2x computation):
 #
 # - 100 shuffles is likely unnecessarily large amount (~99% correlation).
 # - 30 shuffles is excellent (~96-97% correlation).
@@ -169,15 +158,14 @@ _ = ax.legend()
 #
 
 # %%
-task, version = ("ESC", "8a6b9616")
+task, version = "ESC", "406e4cea"
 df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
-best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
+best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=True)
 best_checkpoints
 
 # %%
 random_state = 20240413
 num_shufs = 30
-version = "cc0e922b"
 
 pearson = {}
 res = {}
@@ -233,7 +221,6 @@ hypothetical = False
 put.plot_weights(input_seq_T, shap_val, start, stop, hypothetical)
 # Plot for the average of all folds
 put.plot_weights(input_seq_T, shap_val_avg, start, stop, hypothetical)
-
 
 # %% [markdown]
 # There are some significant differences that can be observed visually between using a single model or averaging across all 5 models from the 5-folds training.

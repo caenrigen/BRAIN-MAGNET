@@ -52,7 +52,7 @@ task: Literal["ESC", "NSC"] = "ESC"
 random_state = 20240413  # for reproducibility
 
 # We train for a fixed number of epochs and post select the best model(s)
-max_epochs = 50
+max_epochs = 75
 
 batch_size = 256
 learning_rate = 0.01
@@ -92,5 +92,3 @@ if folds:
         # break  # if we want to run a single fold only
 else:
     res = train(fold=0)
-
-# %%
