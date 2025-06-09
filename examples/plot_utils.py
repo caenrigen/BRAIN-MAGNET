@@ -1,8 +1,9 @@
-from typing import Optional
+from functools import wraps
 import numpy as np
 from scipy.interpolate import interpn
-from deeplift.visualization import viz_sequence
 import matplotlib.pyplot as plt
+import pandas as pd
+import logomaker
 
 
 def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs):
@@ -34,19 +35,9 @@ def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs)
     return ax
 
 
-def plot_weights(
-    inputs,
-    shap_vals,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
-    hypothetical: bool = False,
-):
-    segment = inputs[:, start:end]
-    hyp_imp_scores_segment = shap_vals[:, start:end]
-    # * The actual importance scores can be computed using an element-wise product of
-    # * the hypothetical importance scores and the actual importance scores
-    if not hypothetical:
-        scores = hyp_imp_scores_segment * segment
-    else:
-        scores = hyp_imp_scores_segment
-    viz_sequence.plot_weights(scores, subticks_frequency=20)
+@wraps(logomaker.Logo)
+def make_logo_from_one_hot(one_hot: np.ndarray, alphabet: str = "ACGT", **kwargs_logo):
+    """Plot weights as a sequence logo."""
+    assert one_hot.shape[-1] == len(alphabet), f"{one_hot.shape[-1]} != {len(alphabet)}"
+    df = pd.DataFrame(one_hot, columns=list(alphabet))
+    return logomaker.Logo(df, **kwargs_logo)

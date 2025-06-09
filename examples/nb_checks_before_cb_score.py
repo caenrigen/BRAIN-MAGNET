@@ -46,15 +46,17 @@ fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 device = torch.device("mps")
 
 # %%
+task, version = "ESC", "cdb72439"
+df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
+best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=False)
+best_checkpoints
+
+# %%
 df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS_NO_SEQ)
 df_enrichment.head()
 
 # %%
-task, version = "ESC", "762acb33"
-fp_checkpoint = dir_train / f"{task}/{version}/checkpoints/epoch=014.ckpt"
-assert fp_checkpoint.exists()
-
-# %%
+task = "ESC"  # does not matter for the analysis in this notebook
 sample_size = 30  # small sample for some fast estimates, shap is pretty slow
 targets = df_enrichment[f"{task}_log2_enrichment"]
 top_targets = targets.sort_values(ascending=False)[:sample_size]
@@ -86,6 +88,7 @@ seeds = [seed_a, seed_b]
 # calculating hypothetical contribution scores
 num_shufs_list = [5, 10, 15, 20, 30, 50, 100, 200]
 
+fp_checkpoint = best_checkpoints[0]
 model_trained = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
 
 pearson = {False: {}, True: {}}
@@ -158,12 +161,6 @@ _ = ax.legend()
 #
 
 # %%
-task, version = "ESC", "406e4cea"
-df_ckpts = dm.list_checkpoints(dp_train=dir_train, task=task, version=version)
-best_checkpoints, *_ = nh.pick_best_checkpoints(df_ckpts, plot=True)
-best_checkpoints
-
-# %%
 random_state = 20240413
 num_shufs = 30
 
@@ -214,13 +211,28 @@ shap_val_avg = np.array(res).mean(axis=0)
 shap_val_avg.shape
 
 # %%
-start, stop = None, None
-hypothetical = False
+figsize = (25, 2)
+start, stop = 0, 300
 
 # Plot for a single fold (last fold from the loop above)
-put.plot_weights(input_seq_T, shap_val, start, stop, hypothetical)
+contribution_scores = input_seq_T.T[start:stop] * shap_val.T[start:stop]
+_ = put.make_logo_from_one_hot(contribution_scores, figsize=figsize)
+plt.gca().set_title("One model, actual contribution scores")
+
 # Plot for the average of all folds
-put.plot_weights(input_seq_T, shap_val_avg, start, stop, hypothetical)
+hypothetical_scores = shap_val.T[start:stop]
+_ = put.make_logo_from_one_hot(hypothetical_scores, figsize=figsize)
+plt.gca().set_title("One model, hypothetical contribution")
+
+# Plot for a single fold (last fold from the loop above)
+contribution_scores = input_seq_T.T[start:stop] * shap_val_avg.T[start:stop]
+_ = put.make_logo_from_one_hot(contribution_scores, figsize=figsize)
+plt.gca().set_title("Average of 5 models (k-folds), actual contribution scores")
+
+# Plot for the average of all folds
+hypothetical_scores = shap_val_avg.T[start:stop]
+_ = put.make_logo_from_one_hot(hypothetical_scores, figsize=figsize)
+plt.gca().set_title("Average of 5 models (k-folds), hypothetical contribution")
 
 # %% [markdown]
 # There are some significant differences that can be observed visually between using a single model or averaging across all 5 models from the 5-folds training.
