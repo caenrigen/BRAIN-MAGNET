@@ -10,9 +10,11 @@ import utils as ut
 
 def make_model():
     """
-    This is a simplified, smaller model that provides the same performance as the
-    original model reported in the paper.
+    This is a simplified, smaller model that provides the same prediction performance
+    as the original model reported in the paper. It is much faster to train/evaluate.
     Additionally, it accepts as input sequences of arbitrary length.
+
+    This models has ~7.9k training parameters.
     """
     # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
     # ! downstream SHAP analysis, i.e. motif discovery.
@@ -239,6 +241,8 @@ def make_model_old():
     """
     This is the original model reported in the paper
     https://www.medrxiv.org/content/10.1101/2024.04.13.24305761v2
+
+    This models has ~67.8M training parameters.
 
     The model above (`make_model`) is a simplified, much smaller, providing the
     same performance and accepts as inputs sequences of arbitrary length.
