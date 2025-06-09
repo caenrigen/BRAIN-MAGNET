@@ -1,9 +1,10 @@
-# conda env create -n g -f bioconda.yaml
+# To create a new conda environment named "g" with these dependencies:
+# conda env create -f bioconda.yaml
 name: g
 channels:
   - conda-forge
   - bioconda
-  - nodefaults  ## ignore user settings
+  - nodefaults ## ignore user settings
 dependencies:
   ## R (CRAN)
   - r-irkernel
@@ -15,7 +16,7 @@ dependencies:
   - r-ggrastr
   - r-reticulate
   # allows to install packages from git repositories within R
-  # requires `brew install libgit2`
+  # on macOS might require `brew install libgit2`
   - r-devtools
 
   ## R (Bioconductor)
@@ -27,3 +28,9 @@ dependencies:
 
   # installed automatically
   # - python
+
+  # used by modisco for matching motifs against a meme database, e.g. JASPAR
+  # Has very restrictive dependencies versions, could not install it on macOS arm64
+  # in the save environment as the rest of the dependencies. Had to create a separate
+  # environment for it in order to have access to the `tomtom` executable.
+  # - meme

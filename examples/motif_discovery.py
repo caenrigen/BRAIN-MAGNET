@@ -9,7 +9,9 @@ import torch
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 
-# A fast implementation of dinucleotide shuffling
+# A fast implementation of dinucleotide shuffling, available on pypi.org
+# Github: https://github.com/austintwang/dinuc_shuf
+# Mirror: https://github.com/caenrigen/dinuc_shuf
 from dinuc_shuf import shuffle as dinuc_shuf_seqs
 
 # Original repo:
