@@ -12,3 +12,6 @@ desktop.ini
 __pycache__
 # code profiling results
 *.prof
+
+# data dir (or symlink to data dir)
+examples/data
