@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -40,7 +40,7 @@ assert fp_jaspar.is_file()
 # %% [markdown]
 # # Input sequences and the SHAP values scores
 #
-# SHAP values, atribution scores or hypotetical contribution scores refer to more or less the same thing.
+# SHAP values, attribution scores or hypothetical contribution scores refer to more or less the same thing.
 #
 
 # %%
@@ -60,7 +60,7 @@ print(sequences.shape, hypothetical_contribs.shape)
 #
 
 # %%
-# This controls how many seqlets are considered intially for clustering.
+# This controls how many seqlets are considered initially for clustering.
 # Here we use a large number since we have a big dataset.
 max_seqlets = 50000
 
@@ -103,7 +103,7 @@ with open(fp_neg_patterns, "wb") as f:
     pickle.dump(neg_patterns, f)
 
 # %% [markdown]
-# # Match motifs against JASPAR database
+# # Match motifs against JASPAR database and visualizing matches
 #
 
 # %%
@@ -118,10 +118,17 @@ assert tomtom_exe.is_file()
 os.environ["PATH"] = f"{os.environ['PATH']}:{tomtom_exe.parent}"
 
 # %% [markdown]
-# Can take 15-30min+ to generate a report.
+# Running the next cell can take 15-30min+ to generate a report.
+#
+# This will generate inside the `output_dir` an HTML `motifs.html` file.
+# It can be opening the in a browser, e.g., Firefox.
+#
+# At the time of the writing the HTML report has some visualization "bugs". E.g., not all matched motifs have their logos displayed.
 #
 
 # %%
+top_n_matches = 10
+
 fp_patterns_h5 = fp_shaps.parent / f"{fp_shaps.stem}_n{max_seqlets}.h5"
 dir_report = fp_patterns_h5.parent / f"{fp_patterns_h5.stem}_report"
 
@@ -131,5 +138,5 @@ modiscolite.report.report_motifs(
     img_path_suffix="./",
     meme_motif_db=fp_jaspar,
     is_writing_tomtom_matrix=False,
-    top_n_matches=10,
+    top_n_matches=top_n_matches,
 )

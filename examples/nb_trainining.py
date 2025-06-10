@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -37,7 +37,7 @@ device = torch.device("mps")  # mps/cuda/cpu
 device
 
 # %% [markdown]
-# To visualise the training progress in more detail run in a terminal:
+# To visualize the training progress in more detail run in a terminal:
 #
 # ```bash
 # tensorboard --logdir ./data/train
@@ -52,7 +52,7 @@ device
 #
 # Open in the browser the URL printed by the command above, e.g. http://localhost:6006/.
 #
-# Explore the tabs for different visulizations:
+# Explore the tabs for different visualizations:
 #
 # - http://localhost:6006/#scalars plots all the logged metrics
 # - http://localhost:6006/#custom_scalars plots both training and validation loss on the same figure

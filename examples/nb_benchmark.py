@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.17.1
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: g
 #     language: python
@@ -160,7 +160,7 @@ _ = nh.plot_corr(
 )
 
 # %% [markdown]
-# The prediction on the forward strand are fairly consitent with the predictions on the reverse strand.
+# The predictions on the forward strand are fairly consistent with the predictions on the reverse strand.
 #
 
 # %% [markdown]
@@ -202,7 +202,7 @@ fig.set_figwidth(15)
 # %% [markdown]
 # The centers of the distributions are very close which is a good sign.
 #
-# The std of the predicitons is smaller. That is expected from a statistical model.
+# The standard deviation of the predictions is smaller. That is expected from a statistical model.
 #
 
 # %% [markdown]

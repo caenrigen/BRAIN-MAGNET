@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# This notebook shows how to a trained model for predictions.
+# This notebook shows how to use a trained model for predictions.
 #
 
 # %%
