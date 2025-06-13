@@ -6,13 +6,14 @@ numpy
 pandas
 matplotlib
 pandas
+standard-imghdr # imghdr was removed from python3.13
 
 # ######################################################################################
 # Jupyter
 # ######################################################################################
 
 ipython>=9 # ipython>=9 is required to support %autoreload in python>=3.13
-ipywidgets
+ipywidgets # for tqdm progress bars
 jupytext
 
 # ######################################################################################
