@@ -407,9 +407,8 @@ def pick_checkpoint(
         min_, max_ = min(df[cols].min()), max(df[cols].max())
         df.plot(y=cols, marker=".", ax=ax)
 
-    m = df[col_train] < df[col_val]
     # Choose the lowest validation loss
-    epoch = df[m].sort_values(by="loss_val").index.values[0]
+    epoch = df.sort_values(by="loss_val").index.values[0]
 
     if ax:
         ax.vlines(epoch, min_, max_, color="red", linestyle="--")
