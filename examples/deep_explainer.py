@@ -116,6 +116,7 @@ def combine_multipliers_and_diff_from_ref(
     # ! the shap module's. There is no need to move it to GPU/MPS, that will create
     # ! errors device-related errors.
     # device: torch.device,
+    len_alphabet: int = len(ut.DNA_ALPHABET),
 ):
     # DeepExaplainer passes in a list of length 1 for our models that have only one
     # input mode (i.e. just sequence as the input mode)
@@ -135,10 +136,12 @@ def combine_multipliers_and_diff_from_ref(
     # List[(4, seq_len)] -> List[(seq_len, 4)]
     orig_inp_ = orig_inp_.transpose(1, 0)
 
-    len_one_hot, num_bp = 4, orig_inp_.shape[0]
+    seq_len = orig_inp_.shape[0]
 
-    assert orig_inp_.ndim == 2, orig_inp_.shape
-    assert orig_inp_.shape[-1] == len_one_hot, orig_inp_.shape
+    assert orig_inp_.ndim == 2, f"{orig_inp_.ndim = } != 2"
+    assert orig_inp_.shape[-1] == len_alphabet, (
+        f"{orig_inp_.shape = } != {len_alphabet = }"
+    )
 
     # We don't need zeros, these will be overwritten.
     # It might give a little speed up to perform calculations using the native
@@ -146,12 +149,12 @@ def combine_multipliers_and_diff_from_ref(
     projected_hyp_contribs = np.empty_like(bg_data_, dtype=np.float64)
     hyp_contribs = np.empty_like(bg_data_, dtype=np.float64)
 
-    ident = np.eye(len_one_hot, dtype=np.float64)
-    # Iterate over 4 hypothetical sequences, each made of the same base,
+    ident = np.eye(len_alphabet, dtype=np.float64)
+    # Iterate over the 4 hypothetical sequences, each made of the same base,
     # e.g. for idx_col_1hot == 0: "AAAA....AAAA" (but one hot encoded of course)
-    for idx_col_1hot in range(len_one_hot):
+    for idx_col_1hot in range(len_alphabet):
         # Tile and add an extra dimension to match the shape of `bg_data`
-        hyp_seq_1hot = np.tile(ident[idx_col_1hot], (1, num_bp, 1))
+        hyp_seq_1hot = np.tile(ident[idx_col_1hot], (1, seq_len, 1))
         np.subtract(hyp_seq_1hot, bg_data_, out=hyp_contribs)
         hyp_contribs *= mult_
         # Sum on the one-hot axis, save directly to `projected_hyp_contribs`.
@@ -249,6 +252,7 @@ def calc_contrib_scores(
     num_shufs: int = 10,
     avg_w_revcomp: bool = True,
     tqdm_bar: bool = True,
+    len_alphabet: int = len(ut.DNA_ALPHABET),
 ):
     """
     A generator that yields the inputs and shap values for each batch in the dataloader.
@@ -268,9 +272,9 @@ def calc_contrib_scores(
         if seq_len is None:
             inputs_tmp, _ = next(it_tmp)
             channels, seq_len = inputs_tmp.shape[-2:]
-            assert channels == 4, channels
+            assert channels == len_alphabet, channels
         else:
-            channels = 4
+            channels = len_alphabet
 
         assert isinstance(seq_len, int), seq_len  # for type checking
         shape_out = (num_seqs, channels, seq_len)
