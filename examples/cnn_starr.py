@@ -24,15 +24,15 @@ def make_model():
         nn.Conv1d(4, 16, kernel_size=15, padding="same"),
         nn.BatchNorm1d(16),
         nn.ReLU(),
-        nn.AvgPool1d(2),
+        nn.AvgPool1d(2, 2),
         nn.Conv1d(16, 16, kernel_size=13, padding="same"),
         nn.BatchNorm1d(16),
         nn.ReLU(),
-        nn.AvgPool1d(2),
+        nn.AvgPool1d(2, 2),
         nn.Conv1d(16, 16, kernel_size=11, padding="same"),
         nn.BatchNorm1d(16),
         nn.ReLU(),
-        nn.AvgPool1d(2),
+        nn.AvgPool1d(2, 2),
         # Using AdaptiveAvgPool1d to make the output of the CNN independent of the
         # input length. And avoid parameters explosion on the linear layer.
         nn.AdaptiveAvgPool1d(1),
