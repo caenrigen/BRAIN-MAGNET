@@ -56,6 +56,9 @@ def make_shuffled_1hot_seqs(
     device: torch.device,
     num_shufs: int = 10,
     rng_seed: int = 20240413,
+    # ! Must be specified if the model being used requires specific sequence length
+    num_bp_sample: int = 1000,
+    len_alphabet: int = len(ut.DNA_ALPHABET),
 ):
     # Assuming len(inp) == 1 because this function is designed for models with one
     # input mode (i.e. just sequence as the input mode)
@@ -64,8 +67,10 @@ def make_shuffled_1hot_seqs(
     # Internally the `DeepExplainer` performs some checks by using a quick sample and
     # requires this function to accept `None` and return some sample ref data (zeros).
     if inp is None:
-        num_bp = 10
-        return torch.tensor(np.zeros((1, 4, num_bp), dtype=np.float32), device=device)
+        return torch.tensor(
+            np.zeros((1, len_alphabet, num_bp_sample), dtype=np.float32),
+            device=device,
+        )
 
     # dinuc_shuffle expects (length x 4) for a one-hot encoded sequence
     seq_1hot = tensor_to_onehot(inp[0])
