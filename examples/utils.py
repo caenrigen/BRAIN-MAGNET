@@ -106,12 +106,32 @@ def pad_one_hot(one_hot: np.ndarray, to: int, alphabet_len: int = len(DNA_ALPHAB
     return np.pad(one_hot, pad_width, mode="constant")
 
 
-def unpad_one_hot(one_hot: np.ndarray, acgt_axis: Literal[0, 1] = 1):
-    """Drop all zeros at the start and/or end of the sequence."""
-    assert one_hot.ndim == 2, one_hot.shape
-    assert acgt_axis in (0, 1), acgt_axis
+def unpad_one_hot_idxs(
+    one_hot: np.ndarray,
+    acgt_axis: Literal[0, 1] = 1,
+    alphabet_len: int = len(DNA_ALPHABET),
+):
+    assert one_hot.ndim == 2, f"{one_hot.ndim = !r}, {one_hot.shape = !r}"
+    assert acgt_axis in (0, 1), f"{acgt_axis = !r} not in (0, 1)"
+    assert one_hot.shape[acgt_axis] == alphabet_len, (
+        f"{one_hot.shape[acgt_axis] = !r} != {alphabet_len = !r}"
+    )
     # +1 because np.diff "shifts" towards the start of the array
     idxs = one_hot.sum(axis=acgt_axis).nonzero()[0]
+    if idxs.size != 0:
+        return np.array([idxs[0], idxs[-1]])  # return only the indices we care about
+    return idxs
+
+
+def unpad_one_hot(
+    one_hot: np.ndarray,
+    acgt_axis: Literal[0, 1] = 1,
+    idxs: Optional[np.ndarray] = None,
+    alphabet_len: int = len(DNA_ALPHABET),
+):
+    """Drop all zeros at the start and/or end of the sequence."""
+    if idxs is None:
+        idxs = unpad_one_hot_idxs(one_hot, acgt_axis, alphabet_len)
     if idxs.size == 0:
         return one_hot  # no padding, nothing to unpad
     if acgt_axis == 1:
