@@ -16,39 +16,44 @@ def make_model():
 
     This models has ~7.9k training parameters.
     """
+    channels = len(ut.DNA_ALPHABET)
+    ks, out, linear = 11, 16, 16
     # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
     # ! downstream SHAP analysis, i.e. motif discovery.
     # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
     # ! exist for such layers, there might caveats and performance issues.
     return nn.Sequential(
-        nn.Conv1d(4, 16, kernel_size=15, padding="same"),
-        nn.BatchNorm1d(16),
+        nn.Conv1d(channels, out, kernel_size=ks, stride=2, padding=ks // 2),
+        nn.BatchNorm1d(out),
         nn.ReLU(),
-        nn.AvgPool1d(2, 2),
-        nn.Conv1d(16, 16, kernel_size=13, padding="same"),
-        nn.BatchNorm1d(16),
+        # ! See comment above.
+        # ! AvgPool1d destroys information, not a good substitute either.
+        # ! Instead we use stride=2 in the conv layer to achieve similar effect.
+        # nn.MaxPool1d(2, 2),
+        nn.Conv1d(out, out, kernel_size=ks - 2, stride=2, padding=(ks - 2) // 2),
+        nn.BatchNorm1d(out),
         nn.ReLU(),
-        nn.AvgPool1d(2, 2),
-        nn.Conv1d(16, 16, kernel_size=11, padding="same"),
-        nn.BatchNorm1d(16),
+        # nn.MaxPool1d(2, 2), # ! see comment above
+        nn.Conv1d(out, out, kernel_size=ks - 4, stride=2, padding=(ks - 4) // 2),
+        nn.BatchNorm1d(out),
         nn.ReLU(),
-        nn.AvgPool1d(2, 2),
-        # Using AdaptiveAvgPool1d to make the output of the CNN independent of the
-        # input length. And avoid parameters explosion on the linear layer.
-        nn.AdaptiveAvgPool1d(1),
+        # nn.MaxPool1d(2, 2),  # ! see comment above
+        # Using AdaptiveAvgPool1d makes the output of the CNN independent of the
+        # input length and avoids parameters explosion when flattening.
+        # ! However, internally AdaptiveAvgPool1d (aka global average pooling)
+        # ! destroys the information about the position of the motifs (in later
+        # ! SHAP analysis), despite performing good predictions.
+        # nn.AdaptiveAvgPool1d(1),
         nn.Flatten(),  # to be able to input into linear layer
-        nn.Linear(16, 16),
-        nn.BatchNorm1d(16),
+        nn.LazyLinear(linear),  # figures out the input size automatically
+        nn.BatchNorm1d(linear),
         nn.ReLU(),
-        # Dropout layer did not seem to be needed. The model is small and the
-        # BatchNorm1d is applying regularization and our dataset is relatively
-        # large providing significant data variety.
-        # nn.Dropout(1 / 16),
-        nn.Linear(16, 16),
-        nn.BatchNorm1d(16),
+        nn.Dropout(4 / linear),
+        nn.Linear(linear, linear),
+        nn.BatchNorm1d(linear),
         nn.ReLU(),
-        # nn.Dropout(1 / 16),
-        nn.Linear(16, 1),
+        nn.Dropout(4 / linear),
+        nn.Linear(linear, 1),
     )
 
 
