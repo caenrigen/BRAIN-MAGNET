@@ -37,16 +37,16 @@ dpyt.op_handler["Flatten"] = dpyt.passthrough
 
 def tensor_to_onehot(t):
     # Detach is because we won't need the gradients
-    assert t.ndim == 2, f"{t.ndim = } != 2"
-    return t.detach().transpose(1, 0).cpu().numpy()
+    assert t.ndim == 3, f"{t.ndim = } != 3"
+    return t.detach().squeeze().transpose(1, 0).cpu().numpy()
 
 
 def one_hot_to_tensor_shape(one_hot: np.ndarray):
     assert one_hot.ndim in (2, 3), f"{one_hot.ndim = } not in (2, 3)"
     if one_hot.ndim == 2:
-        return one_hot.transpose(1, 0)
+        return one_hot.transpose(1, 0)[:, None, :]
     elif one_hot.ndim == 3:
-        return one_hot.transpose(0, 2, 1)
+        return one_hot.transpose(0, 2, 1)[:, :, None, :]
     else:
         raise NotImplementedError(f"{one_hot.ndim = }")
 
@@ -68,7 +68,7 @@ def make_shuffled_1hot_seqs(
     # requires this function to accept `None` and return some sample ref data (zeros).
     if inp is None:
         return torch.tensor(
-            np.zeros((1, len_alphabet, num_bp_sample), dtype=np.float32),
+            np.zeros((1, len_alphabet, 1, num_bp_sample), dtype=np.float32),
             device=device,
         )
 
@@ -130,11 +130,11 @@ def combine_multipliers_and_diff_from_ref(
     # Perform transposing because the code was designed for inputs that are in the
     # format (seq_len x 4)
     # List[(num_shufs, 4, seq_len)] -> List[(num_shufs, seq_len, 4)]
-    mult_ = mult_.transpose(0, 2, 1)
+    mult_ = mult_.squeeze().transpose(0, 2, 1)
     # List[(num_shufs, 4, seq_len)] -> List[(num_shufs, seq_len, 4)]
-    bg_data_ = bg_data_.transpose(0, 2, 1)
+    bg_data_ = bg_data_.squeeze().transpose(0, 2, 1)
     # List[(4, seq_len)] -> List[(seq_len, 4)]
-    orig_inp_ = orig_inp_.transpose(1, 0)
+    orig_inp_ = orig_inp_.squeeze().transpose(1, 0)
 
     seq_len = orig_inp_.shape[0]
 
@@ -232,7 +232,7 @@ def calc_contrib_scores_step(
         shap_vals += ut.one_hot_reverse_complement(shap_vals_revcomp)
         shap_vals /= 2  # average
 
-    return inputs.detach(), shap_vals
+    return inputs.detach().squeeze(), shap_vals.squeeze()
 
 
 def calc_contrib_scores(
@@ -271,7 +271,7 @@ def calc_contrib_scores(
             num_seqs = len(dataloader.sampler)  # type: ignore
         if seq_len is None:
             inputs_tmp, _ = next(it_tmp)
-            channels, seq_len = inputs_tmp.shape[-2:]
+            channels, _, seq_len = inputs_tmp.shape[-3:]
             assert channels == len_alphabet, channels
         else:
             channels = len_alphabet

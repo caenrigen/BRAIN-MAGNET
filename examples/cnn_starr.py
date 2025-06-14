@@ -85,7 +85,8 @@ class ModelModule(L.LightningModule):
         # is more intuitive than the values of the MSE loss function.
         self.cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
 
-        self.model = model or make_model()
+        # self.model = model or make_model()
+        self.model = model or make_model_old_2d()
 
     def forward(self, x):
         if self.forward_mode == "forward":
@@ -152,7 +153,7 @@ class ModelModule(L.LightningModule):
     def configure_optimizers(self):
         # Using AdamW which is supposed to deal more correctly with weight decay,
         # in case we ever need a weight decay.
-        return torch.optim.AdamW(
+        return torch.optim.Adam(
             self.parameters(),
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
@@ -237,7 +238,7 @@ def pearson_correlation_estimate(predictions, targets, cos_sim: nn.CosineSimilar
     return cos_sim(predictions - predictions.mean(), targets - targets.mean())
 
 
-def make_model_old():
+def make_model_old_2d():
     """
     This is the original model reported in the paper
     https://www.medrxiv.org/content/10.1101/2024.04.13.24305761v2
@@ -248,18 +249,18 @@ def make_model_old():
     same performance and accepts as inputs sequences of arbitrary length.
     """
     return nn.Sequential(
-        nn.Conv1d(4, 128, 11, padding="same"),
-        nn.BatchNorm1d(128),
+        nn.Conv2d(4, 128, (1, 11), padding="same"),
+        nn.BatchNorm2d(128),
         nn.ReLU(),
-        nn.MaxPool1d(2, 2),
-        nn.Conv1d(128, 256, 9, padding="same"),
-        nn.BatchNorm1d(256),
+        nn.MaxPool2d((1, 2), (1, 2)),
+        nn.Conv2d(128, 256, (1, 9), padding="same"),
+        nn.BatchNorm2d(256),
         nn.ReLU(),
-        nn.MaxPool1d(2, 2),
-        nn.Conv1d(256, 512, 7, padding="same"),
-        nn.BatchNorm1d(512),
+        nn.MaxPool2d((1, 2), (1, 2)),
+        nn.Conv2d(256, 512, (1, 7), padding="same"),
+        nn.BatchNorm2d(512),
         nn.ReLU(),
-        nn.MaxPool1d(2, 2),
+        nn.MaxPool2d((1, 2), (1, 2)),
         nn.Flatten(),
         nn.Linear(64000, 1024),
         nn.BatchNorm1d(1024),
