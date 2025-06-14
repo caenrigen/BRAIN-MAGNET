@@ -97,9 +97,13 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
     assert seqs_batch.shape == expected_shape, (seqs_batch.shape, expected_shape)
 
     # Convert to torch.Tensor (float32)
-    seqs_tensor = torch.from_numpy(seqs_batch).float().unsqueeze(2)
+    seqs_tensor = torch.tensor(
+        seqs_batch.astype(np.float32), dtype=torch.float32
+    ).unsqueeze(2)
     # Targets: small list (compared to seqs_batch), so direct tensor conversion
-    targets_tensor = torch.tensor(targets, dtype=torch.float32)
+    targets_tensor = torch.tensor(
+        [t.astype(np.float32) for t in targets], dtype=torch.float32
+    )
 
     # add one dimension in targets: [batch] -> [batch, 1]
     return seqs_tensor, targets_tensor.unsqueeze(1)

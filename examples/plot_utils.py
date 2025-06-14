@@ -3,7 +3,7 @@ import numpy as np
 from scipy.interpolate import interpn
 import matplotlib.pyplot as plt
 import pandas as pd
-import logomaker
+# import logomaker
 
 
 def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs):
@@ -35,9 +35,9 @@ def density_scatter(x, y, ax=None, sort=True, bins=100, cmap="plasma", **kwargs)
     return ax
 
 
-@wraps(logomaker.Logo)
-def make_logo_from_one_hot(one_hot: np.ndarray, alphabet: str = "ACGT", **kwargs_logo):
-    """Plot weights as a sequence logo."""
-    assert one_hot.shape[-1] == len(alphabet), f"{one_hot.shape[-1]} != {len(alphabet)}"
-    df = pd.DataFrame(one_hot, columns=list(alphabet))
-    return logomaker.Logo(df, **kwargs_logo)
+# @wraps(logomaker.Logo)
+# def make_logo_from_one_hot(one_hot: np.ndarray, alphabet: str = "ACGT", **kwargs_logo):
+#     """Plot weights as a sequence logo."""
+#     assert one_hot.shape[-1] == len(alphabet), f"{one_hot.shape[-1]} != {len(alphabet)}"
+#     df = pd.DataFrame(one_hot, columns=list(alphabet))
+#     return logomaker.Logo(df, **kwargs_logo)

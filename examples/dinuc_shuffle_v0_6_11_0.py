@@ -69,7 +69,9 @@ def shuffle_several_times(inp):
     # input mode (i.e. just sequence as the input mode)
     assert (inp is None) or len(inp) == 1
     if inp is None:
-        return torch.tensor(np.zeros((1, 4, 1, 1000)).astype("float32")).to(device)
+        return torch.tensor(
+            np.zeros((1, 4, 1, 1000), dtype=np.float32), dtype=torch.float32
+        ).to(device)
     else:
         # Some reshaping/transposing needs to be performed before calling
         # onehot_dinuc_shuffle becuase the input to the DeepSEA model
