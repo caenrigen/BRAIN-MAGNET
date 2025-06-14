@@ -15,6 +15,8 @@ import torch
 from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 
+import dinuc_shuffle_v0_6_11_0 as ds
+
 # A fast implementation of the dinucleotide shuffling, available on pypi.org
 # Github: https://github.com/austintwang/dinuc_shuf
 # Mirror: https://github.com/caenrigen/dinuc_shuf
@@ -210,12 +212,12 @@ def calc_contrib_scores_step(
     e = shap.DeepExplainer(
         model=model_trained,
         data=partial(
-            make_shuffled_1hot_seqs,
-            device=device,
-            num_shufs=num_shufs,
-            rng_seed=random_state,
+            ds.shuffle_several_times,
+            # device=device,
+            # num_shufs=num_shufs,
+            # rng_seed=random_state,
         ),
-        combine_mult_and_diffref=combine_multipliers_and_diff_from_ref,
+        combine_mult_and_diffref=ds.combine_mult_and_diffref,
     )
     # `inputs` is a tensor of shape (batch_size, 4, num_bp)
     # These will be consumed by TF-MoDISco
