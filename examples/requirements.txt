@@ -6,35 +6,33 @@ numpy
 pandas
 matplotlib
 pandas
-standard-imghdr # imghdr was removed from python3.13
+scikit-learn
 
 # ######################################################################################
 # Jupyter
 # ######################################################################################
 
-ipython>=9 # ipython>=9 is required to support %autoreload in python>=3.13
+ipykernel
+ipython
 ipywidgets # for tqdm progress bars
-jupytext
 
 # ######################################################################################
 # PyTorch model training
 # ######################################################################################
 
-torch
-lightning>=2.5.0 # lower versions might work too
-tensorbaord
+torch==1.13.1
 
 # ######################################################################################
 # `shap`, `tfmodisco-lite` are required for motif discovery
 # ######################################################################################
 
 # Fork of https://github.com/kundajelab/shap with small fix to support recent ipython
-shap @ git+https://git@github.com/caenrigen/shap.git@master#egg=shap
+# shap @ git+https://git@github.com/caenrigen/shap.git@master#egg=shap
 
 
 # Fork of https://github.com/jmschrei/tfmodisco-lite with small pull request fix merged
-tfmodisco-lite @ git+https://git@github.com/caenrigen/tfmodisco-lite.git@main#egg=tfmodisco-lite
+# tfmodisco-lite @ git+https://git@github.com/caenrigen/tfmodisco-lite.git@main#egg=tfmodisco-lite
 
 # Used only for making nucleotides logos and plotting contribution scores.
 # Also required by `tfmodisco-lite`.
-logomaker
+# logomaker
