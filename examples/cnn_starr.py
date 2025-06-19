@@ -17,25 +17,26 @@ def make_model():
     This models has ~7.9k training parameters.
     """
     channels = len(ut.DNA_ALPHABET)
-    ks, out, linear = 11, 16, 16
+    out0, out1, out2 = 16, 32, 64
+    ks, linear, dropout = 11, 256, 0.4
     # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
     # ! downstream SHAP analysis, i.e. motif discovery.
-    # ! Such layers are tricky to deal with in the SHAP analysis, even if solutions
-    # ! exist for such layers, there might caveats and performance issues.
+    # ! Such layers are tricky to deal within the SHAP analysis, even if solutions
+    # ! exist for such layers, there might be caveats and performance issues.
     return nn.Sequential(
-        nn.Conv1d(channels, out, kernel_size=ks, stride=2, padding=ks // 2),
-        nn.BatchNorm1d(out),
+        nn.Conv1d(channels, out0, kernel_size=ks, stride=2, padding=ks // 2),
+        nn.BatchNorm1d(out0),
         nn.ReLU(),
-        # ! See comment above.
+        # ! MaxPool layers are tricky to deal within the SHAP analysis.
         # ! AvgPool1d destroys information, not a good substitute either.
         # ! Instead we use stride=2 in the conv layer to achieve similar effect.
         # nn.MaxPool1d(2, 2),
-        nn.Conv1d(out, out, kernel_size=ks - 2, stride=2, padding=(ks - 2) // 2),
-        nn.BatchNorm1d(out),
+        nn.Conv1d(out0, out1, kernel_size=ks - 2, stride=2, padding=(ks - 2) // 2),
+        nn.BatchNorm1d(out1),
         nn.ReLU(),
         # nn.MaxPool1d(2, 2), # ! see comment above
-        nn.Conv1d(out, out, kernel_size=ks - 4, stride=2, padding=(ks - 4) // 2),
-        nn.BatchNorm1d(out),
+        nn.Conv1d(out1, out2, kernel_size=ks - 4, stride=2, padding=(ks - 4) // 2),
+        nn.BatchNorm1d(out2),
         nn.ReLU(),
         # nn.MaxPool1d(2, 2),  # ! see comment above
         # Using AdaptiveAvgPool1d makes the output of the CNN independent of the
@@ -45,14 +46,15 @@ def make_model():
         # ! SHAP analysis), despite performing good predictions.
         # nn.AdaptiveAvgPool1d(1),
         nn.Flatten(),  # to be able to input into linear layer
-        nn.LazyLinear(linear),  # figures out the input size automatically
+        # figures out the input size automatically, for easy prototyping
+        nn.LazyLinear(linear),
         nn.BatchNorm1d(linear),
         nn.ReLU(),
-        nn.Dropout(4 / linear),
+        nn.Dropout(dropout),
         nn.Linear(linear, linear),
         nn.BatchNorm1d(linear),
         nn.ReLU(),
-        nn.Dropout(4 / linear),
+        nn.Dropout(dropout),
         nn.Linear(linear, 1),
     )
 
