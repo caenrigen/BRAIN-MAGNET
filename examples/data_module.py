@@ -1,14 +1,12 @@
 import logging
-import lightning as L
 import torch
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union, Literal
+from typing import Callable, List, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
 
 import utils as ut
 
@@ -64,12 +62,12 @@ class MemMapDataset(Dataset):
             self.seqs_1hot = ut.one_hot_reverse_complement(self.seqs_1hot)  # type: ignore
 
         if len(self.seqs_1hot) != len(self.targets):
-            raise ValueError(f"{len(self.seqs_1hot) = } != {len(self.targets) = }")
+            raise ValueError(f"{len(self.seqs_1hot)} != {len(self.targets)}")
 
         if self.seqs_1hot.ndim != 3:
-            raise ValueError(f"{self.seqs_1hot.ndim = } must be 3")
+            raise ValueError(f"{self.seqs_1hot.ndim} must be 3")
         if self.seqs_1hot.shape[1] != 4:
-            raise ValueError(f"{self.seqs_1hot.shape[1] = } must be 4")
+            raise ValueError(f"{self.seqs_1hot.shape[1]} must be 4")
 
     def __len__(self):
         return len(self.targets)
@@ -109,46 +107,25 @@ def collate(batch: List[Tuple[np.ndarray, np.ndarray]]):
     return seqs_tensor, targets_tensor.unsqueeze(1)
 
 
-class DataModule(L.LightningDataModule):
+class DataModule:
     def __init__(
         self,
         fp_dataset: Union[Path, str],
         augment_w_rev_comp: bool,
-        targets_col: Union[Literal["ESC_log2_enrichment", "NSC_log2_enrichment"], str],
+        targets_col: str,
         x_col: str = "Seq",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
         random_state: int = 20240413,
-        folds: Optional[int] = None,  # Number of folds for cross-validation
-        fold: int = 0,  # Current fold index (0 to folds-1)
-        frac_test: float = 0.10,
+        frac_test: float = 0.00,
         frac_val: float = 0.10,
         validate_split: bool = True,
         bins_func: Callable = bins_log2,
         padding: int = 1000,
         # DataLoader kwargs:
         batch_size: int = 128,
-        # On macOS with MPS (Apple Silicon) using multiprocessing did not give any speed up.
-        # With CUDA maybe it does, thought out MemMapDataset is already efficient.
-        num_workers: int = 0,
-        # Only relevant if num_workers > 0
-        # Ref: https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
-        # multiprocessing_context="fork" won't consume a lot of RAM,
-        # but might not work (well) on all OSes/versions.
-        multiprocessing_context=None,
-        persistent_workers: Optional[bool] = None,
         **dataloader_kwargs,
     ):
         super().__init__()
-        if folds is not None and fold >= folds:
-            raise ValueError(f"{fold = } must be less than {folds = }")
-        if frac_val and folds:
-            # To ensure there is no confusion about how the folds work
-            raise ValueError(
-                "frac_val does not apply for folds. "
-                "Set frac_val=0 if you are using folds (or set folds=None)."
-            )
-        if not frac_val and not folds:
-            raise ValueError("frac_val and folds cannot be both zero")
 
         self.fp_dataset = Path(fp_dataset)
         if not self.fp_dataset.is_file():
@@ -166,8 +143,6 @@ class DataModule(L.LightningDataModule):
         self.x_col = x_col
         self.targets_col = targets_col
         self.random_state = random_state
-        self.folds = folds or None  # 0 is equivalent to no folds
-        self.fold = fold
         self.frac_test = frac_test
         self.frac_val = frac_val
         self.bins_func = bins_func
@@ -179,9 +154,6 @@ class DataModule(L.LightningDataModule):
         self.indices_test: Optional[np.ndarray] = None
         self.indices_val: Optional[np.ndarray] = None
 
-        if persistent_workers is None:
-            persistent_workers = num_workers > 0
-
         # A convenience wrapper for instantiating DataLoader
         self.DataLoader = partial(
             DataLoader,
@@ -189,9 +161,6 @@ class DataModule(L.LightningDataModule):
             # For the full dataset, we want to stay consistent with the original order.
             shuffle=False,
             collate_fn=collate,
-            num_workers=num_workers,
-            multiprocessing_context=multiprocessing_context,
-            persistent_workers=persistent_workers,
             batch_size=batch_size,
             **dataloader_kwargs,
         )
@@ -235,7 +204,7 @@ class DataModule(L.LightningDataModule):
             logger.info(f"Saving one-hot encoded sequences: {self.fp_npy_1hot_seqs}")
             np.save(self.fp_npy_1hot_seqs, seqs_1hot)
 
-    def setup(self, stage: Literal["fit", "test", None] = None):
+    def setup(self, stage: Optional[str] = None):
         """It is ok to make state assignments in this method"""
 
         df = pd.read_csv(self.fp_dataset, usecols=[self.targets_col])
@@ -270,35 +239,15 @@ class DataModule(L.LightningDataModule):
             )
             self.indices_test = self.concat_rev(self.indices_test)
 
-        if stage == "test":
-            return  # the rest of the code is not needed for test stage
-
-        # Make a train/val split, k-folds for cross-validation or simple split
-        if self.folds is not None:
-            kf = StratifiedKFold(
-                n_splits=self.folds,
-                shuffle=True,
-                random_state=self.random_state,
-            )
-            targets_train_val = self.targets[indices_train_val]
-            # X is dummy, it is not relevant for stratified splitting
-            split = kf.split(X=targets_train_val, y=self.bins_func(targets_train_val))
-            for i, (train_idxs, val_idxs) in enumerate(split):
-                if i != self.fold:
-                    continue  # only run for the current fold, continue otherwise
-                assert len(val_idxs) < len(train_idxs)
-                self.indices_train = self.concat_rev(indices_train_val[train_idxs])
-                self.indices_val = self.concat_rev(indices_train_val[val_idxs])
-        else:
-            indices_train, indices_val = train_test_split(
-                indices_train_val,
-                test_size=self.frac_val,
-                random_state=self.random_state,
-                stratify=self.bins_func(self.targets[indices_train_val]),
-                shuffle=True,  # stratify requires shuffle=True
-            )
-            self.indices_train = self.concat_rev(indices_train)
-            self.indices_val = self.concat_rev(indices_val)
+        indices_train, indices_val = train_test_split(
+            indices_train_val,
+            test_size=self.frac_val,
+            random_state=self.random_state,
+            stratify=self.bins_func(self.targets[indices_train_val]),
+            shuffle=True,  # stratify requires shuffle=True
+        )
+        self.indices_train = self.concat_rev(indices_train)
+        self.indices_val = self.concat_rev(indices_val)
 
         if self.validate_split:
             self.validate_data_split()
@@ -310,7 +259,7 @@ class DataModule(L.LightningDataModule):
         set_train = set(self.indices_train)
         set_val = set(self.indices_val)
         # The train and val sets must be disjoint
-        assert set_train & set_val == set(), f"{set_train = } != {set_val = }"
+        assert set_train & set_val == set(), f"{set_train} != {set_val}"
 
         num_samples = len(self.indices_train) + len(self.indices_val)
         unique_samples = set_train | set_val
@@ -329,9 +278,9 @@ class DataModule(L.LightningDataModule):
             len_targets *= 2
 
         # The data split must cover the whole dataset
-        assert num_samples == len_targets, f"{num_samples = } != {len_targets = }"
+        assert num_samples == len_targets, f"{num_samples} != {len_targets}"
         assert len(unique_samples) == len_targets, (
-            f"{len(unique_samples) = } != {len_targets = }"
+            f"{len(unique_samples)} != {len_targets}"
         )
 
     def train_dataloader(self):
@@ -349,72 +298,3 @@ class DataModule(L.LightningDataModule):
     def full_dataloader(self):
         assert self.indices_full is not None
         return self.DataLoader(self.dataset, sampler=self.indices_full)
-
-
-def extract_fold(fp: Path):
-    parts = fp.parent.parent.name.split("_f")
-    if len(parts) == 2:
-        version, fold = parts
-    else:
-        version, fold = parts[0], None
-    return version, fold
-
-
-def extract_epoch(fp: Path):
-    # name = "epoch000.ckpt"
-    return int(fp.name.split(".")[0].split("=")[-1])
-
-
-def list_checkpoints(
-    dp_train: Path, task: str, version: str = "", read_tb: bool = True
-):
-    dp = dp_train / task
-    dps_folds = list(fp for fp in dp.glob(f"{version}*") if fp.is_dir())
-    rows = []
-    for dp in dps_folds:
-        dp = dp / "checkpoints"
-        rows += list(dp.glob("*.ckpt"))
-
-    s_fps = pd.Series(rows)
-    s_fps.name = "fp"
-    df = s_fps.to_frame()
-
-    df["version"], df["fold"] = zip(*df.fp.map(extract_fold))  # type: ignore
-    df["fold"] = df["fold"].astype(float).fillna(0).astype(int)
-    df["epoch"] = df.fp.map(extract_epoch)
-    df.sort_values(["fold", "epoch"], inplace=True)
-
-    if not read_tb:
-        return df
-
-    dfs = []
-    for _, df_v in df.groupby("version"):
-        for _, df_f in df_v.groupby("fold"):
-            fp_tb = list(df_f.fp.iloc[0].parent.parent.glob("events.out.tfevents.*"))[0]
-            df_tb = ut.read_tensorboard_log(fp_tb)  # comes sorted by step
-            for col in df_tb.columns:
-                df_f[col] = df_tb[col].values
-            dfs.append(df_f)
-
-    df = pd.concat(dfs)
-    return df
-
-
-def pick_checkpoint(
-    df: pd.DataFrame, col_train: str = "loss_train", col_val: str = "loss_val", ax=None
-):
-    df = df.copy()
-    df.set_index("epoch", inplace=True)
-    df.sort_index(inplace=True)
-    if ax:
-        cols = [col_train, col_val]
-        min_, max_ = min(df[cols].min()), max(df[cols].max())
-        df.plot(y=cols, marker=".", ax=ax)
-
-    # Choose the lowest validation loss
-    epoch = df.sort_values(by="loss_val").index.values[0]
-
-    if ax:
-        ax.vlines(epoch, min_, max_, color="red", linestyle="--")
-
-    return int(epoch)

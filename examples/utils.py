@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Sequence, Union, Literal
+from typing import Optional, Sequence, Union
 from functools import partial
 import time
 
@@ -7,17 +7,6 @@ import pandas as pd
 import torch
 import numpy as np
 from numpy.random import default_rng
-
-# from sklearn.metrics import mean_squared_error
-# from scipy import stats
-from tensorboard.backend.event_processing import event_accumulator
-
-
-def empty_cache(device: torch.device):
-    if device.type == "mps":
-        torch.mps.empty_cache()
-    elif device.type == "cuda":
-        torch.cuda.empty_cache()
 
 
 def make_version(fold: Optional[int] = None, version: Optional[str] = None):
@@ -67,7 +56,7 @@ def one_hot_encode(
     validate: bool = True,
 ):
     if validate:
-        assert sequence.isupper(), f"{sequence.isupper() = !r}, {sequence = !r}"
+        assert sequence.isupper(), f"{sequence.isupper()!r}, {sequence!r}"
     one_hot = ONE_HOT_ENCODED_ALPHABET[to_uint8(sequence)]
     if pad_to is not None:
         one_hot = pad_one_hot(one_hot, to=pad_to)
@@ -109,13 +98,13 @@ def pad_one_hot(one_hot: np.ndarray, to: int, alphabet_len: int = len(DNA_ALPHAB
 
 def unpad_one_hot_idxs(
     one_hot: np.ndarray,
-    acgt_axis: Literal[0, 1] = 1,
+    acgt_axis=1,
     alphabet_len: int = len(DNA_ALPHABET),
 ):
-    assert one_hot.ndim == 2, f"{one_hot.ndim = !r}, {one_hot.shape = !r}"
-    assert acgt_axis in (0, 1), f"{acgt_axis = !r} not in (0, 1)"
+    assert one_hot.ndim == 2, f"{one_hot.ndim}, {one_hot.shape}"
+    assert acgt_axis in (0, 1), f"{acgt_axis} not in (0, 1)"
     assert one_hot.shape[acgt_axis] == alphabet_len, (
-        f"{one_hot.shape[acgt_axis] = !r} != {alphabet_len = !r}"
+        f"{one_hot.shape[acgt_axis]} != {alphabet_len}"
     )
     # +1 because np.diff "shifts" towards the start of the array
     idxs = one_hot.sum(axis=acgt_axis).nonzero()[0]
@@ -126,7 +115,7 @@ def unpad_one_hot_idxs(
 
 def unpad_one_hot(
     one_hot: np.ndarray,
-    acgt_axis: Literal[0, 1] = 1,
+    acgt_axis=1,
     idxs: Optional[np.ndarray] = None,
     alphabet_len: int = len(DNA_ALPHABET),
 ):
@@ -161,7 +150,7 @@ def one_hot_reverse_complement(one_hot: Union[np.ndarray, torch.Tensor]):
     elif isinstance(one_hot, torch.Tensor):
         return torch.flip(one_hot, (-2, -1))
     else:
-        raise NotImplementedError(f"Unsupported {type(one_hot) = !r}")
+        raise NotImplementedError(f"Unsupported {type(one_hot)}")
 
 
 def sequences_str_to_1hot(
