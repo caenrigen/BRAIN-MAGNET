@@ -19,7 +19,6 @@
 
 # %%
 from pathlib import Path
-from functools import partial
 from numpy.random import default_rng
 import time
 
@@ -44,31 +43,29 @@ device
 class ModelModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
-
-        # self.model = model or make_model()
         self.model = nn.Sequential(
-            nn.Conv2d(4, 16, (1, 11), padding="same"),
-            nn.BatchNorm2d(16),
+            nn.Conv2d(4, 128, (1, 11), padding="same"),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Conv2d(16, 32, (1, 9), padding="same"),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(128, 256, (1, 9), padding="same"),
+            nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
-            nn.Conv2d(32, 64, (1, 7), padding="same"),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(256, 512, (1, 7), padding="same"),
+            nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.MaxPool2d((1, 2), (1, 2)),
             nn.Flatten(),
-            nn.Linear(64 // (2**3) * 1000, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(512 // (2**3) * 1000, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
             nn.Dropout(0.4),
-            nn.Linear(128, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(1024, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
             nn.Dropout(0.4),
-            nn.Linear(128, 1),
+            nn.Linear(1024, 1),
         )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
 
@@ -79,7 +76,6 @@ class ModelModule(torch.nn.Module):
 loss_fn = nn.MSELoss()
 model = ModelModule()
 model
-
 
 # %%
 dir_data = Path("./data")
@@ -105,10 +101,6 @@ datamodule.prepare_data()
 datamodule.setup()
 dataloader_train = datamodule.train_dataloader()
 dataloader_val = datamodule.val_dataloader()
-
-# %% [raw]
-# for i in tqdm(range(10), desc="tb", leave=False):
-#     time.sleep(0.2)
 
 # %%
 rng_version = default_rng(int(time.time()))

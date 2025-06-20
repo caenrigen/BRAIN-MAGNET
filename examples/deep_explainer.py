@@ -20,7 +20,7 @@ import dinuc_shuffle_v0_6_11_0 as ds
 # A fast implementation of the dinucleotide shuffling, available on pypi.org
 # Github: https://github.com/austintwang/dinuc_shuf
 # Mirror: https://github.com/caenrigen/dinuc_shuf
-from dinuc_shuf import shuffle as dinuc_shuf_seqs
+# from dinuc_shuf import shuffle as dinuc_shuf_seqs
 
 # Original repo:
 # https://github.com/kundajelab/shap/commit/29d2ffab405619340419fc848de6b53e2ef0f00c
@@ -29,7 +29,6 @@ from dinuc_shuf import shuffle as dinuc_shuf_seqs
 import shap
 
 import utils as ut
-import cnn_starr as cnn
 
 # Specify handler for Flatten used in our model, otherwise `shap_values` will emit
 # warnings and (potentially) use an incorrect handler.
@@ -39,18 +38,18 @@ dpyt.op_handler["Flatten"] = dpyt.passthrough
 
 def tensor_to_onehot(t):
     # Detach is because we won't need the gradients
-    assert t.ndim == 3, f"{t.ndim = } != 3"
+    assert t.ndim == 3, f"{t.ndim} != 3"
     return t.detach().squeeze().transpose(1, 0).cpu().numpy()
 
 
 def one_hot_to_tensor_shape(one_hot: np.ndarray):
-    assert one_hot.ndim in (2, 3), f"{one_hot.ndim = } not in (2, 3)"
+    assert one_hot.ndim in (2, 3), f"{one_hot.ndim} not in (2, 3)"
     if one_hot.ndim == 2:
         return one_hot.transpose(1, 0)[:, None, :]
     elif one_hot.ndim == 3:
         return one_hot.transpose(0, 2, 1)[:, :, None, :]
     else:
-        raise NotImplementedError(f"{one_hot.ndim = }")
+        raise NotImplementedError(f"{one_hot.ndim}")
 
 
 def make_shuffled_1hot_seqs(
@@ -140,10 +139,8 @@ def combine_multipliers_and_diff_from_ref(
 
     seq_len = orig_inp_.shape[0]
 
-    assert orig_inp_.ndim == 2, f"{orig_inp_.ndim = } != 2"
-    assert orig_inp_.shape[-1] == len_alphabet, (
-        f"{orig_inp_.shape = } != {len_alphabet = }"
-    )
+    assert orig_inp_.ndim == 2, f"{orig_inp_.ndim} != 2"
+    assert orig_inp_.shape[-1] == len_alphabet, f"{orig_inp_.shape} != {len_alphabet}"
 
     # We don't need zeros, these will be overwritten.
     # It might give a little speed up to perform calculations using the native
@@ -182,7 +179,7 @@ warnings.filterwarnings(
 
 def calc_contrib_scores_step(
     data_batch: Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor],
-    model_trained: cnn.ModelModule,
+    model_trained,
     device: torch.device,
     random_state: int = 20240413,
     num_shufs: int = 10,
@@ -202,7 +199,7 @@ def calc_contrib_scores_step(
     elif isinstance(data_batch, torch.Tensor):
         inputs = data_batch
     else:
-        raise ValueError(f"Unknown {type(data_batch) = }")
+        raise ValueError(f"Unknown {type(data_batch)}")
     # the DeepExplainer will evaluate the inputs to get the pytorch gradients,
     # put the inputs on the same device for faster inference when using GPU/MPS
     inputs = inputs.to(device)
@@ -239,7 +236,7 @@ def calc_contrib_scores_step(
 
 def calc_contrib_scores(
     dataloader: DataLoader,
-    model_trained: cnn.ModelModule,
+    model_trained,
     device: torch.device,
     fp_out_shap: Optional[Path] = None,
     fp_out_inputs: Optional[Path] = None,
@@ -335,7 +332,7 @@ def calc_contrib_scores(
 
 def calc_contrib_scores_concatenated(
     dataloader: DataLoader,
-    model_trained: cnn.ModelModule,
+    model_trained,
     device: torch.device,
     random_state: int = 20240413,
     num_shufs: int = 10,
