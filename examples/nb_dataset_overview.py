@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 # %%
 import data_module as dm
@@ -45,21 +46,37 @@ df_enrichment
 # %%
 df_enrichment[df_enrichment.N_counts > 0]
 
+# %% [markdown]
+# # Sequences distribution across chromosomes
+#
+
 # %%
 _ = df_enrichment.Chr_id.value_counts().plot(kind="bar")
 ax = plt.gca()
 ax.set_xlabel("Chromosome")
 _ = ax.set_ylabel("# Sequences")
 
+# %% [markdown]
+# # Sequences length
+#
+
 # %%
 _ = df_enrichment.Seq_len.hist()
 _ = plt.gca().set_xlabel("Sequence Length")
 _ = plt.gca().set_ylabel("# Sequences")
 
+# %% [markdown]
+# # GC content
+#
+
 # %%
 df_enrichment.GC_content.hist()
 _ = plt.gca().set_xlabel("GC Content")
 _ = plt.gca().set_ylabel("# Sequences")
+
+# %% [markdown]
+# # Enhancer activity
+#
 
 # %%
 fig, axs = plt.subplots(1, 2, figsize=(2 * 4 * 1.61, 4), sharey=True)

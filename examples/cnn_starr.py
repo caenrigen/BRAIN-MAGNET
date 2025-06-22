@@ -8,17 +8,22 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
 
-def make_model():
+def make_model(
+    channels: int = len(ut.DNA_ALPHABET),
+    ks: int = 11,
+    out0: int = 16,
+    out1: int = 32,
+    out2: int = 64,
+    linear: int = 32,
+    dropout_linear: float = 0.1,
+    dropout_conv: float = 0.1,
+):
     """
     This is a simplified, smaller model that provides the same prediction performance
     as the original model reported in the paper. It is much faster to train/evaluate.
-    Additionally, it accepts as input sequences of arbitrary length.
 
-    This models has ~7.9k training parameters.
+    This models has ~21.2k training parameters.
     """
-    channels = len(ut.DNA_ALPHABET)
-    out0, out1, out2 = 16, 32, 64
-    ks, linear, dropout = 11, 256, 0.4
     # ! Avoid layers like MaxPool1d, AdaptiveMaxPool1d, etc. for simplicity of the
     # ! downstream SHAP analysis, i.e. motif discovery.
     # ! Such layers are tricky to deal within the SHAP analysis, even if solutions
@@ -27,17 +32,20 @@ def make_model():
         nn.Conv1d(channels, out0, kernel_size=ks, stride=2, padding=ks // 2),
         nn.BatchNorm1d(out0),
         nn.ReLU(),
+        nn.Dropout(dropout_conv),
         # ! MaxPool layers are tricky to deal within the SHAP analysis.
         # ! AvgPool1d destroys information, not a good substitute either.
-        # ! Instead we use stride=2 in the conv layer to achieve similar effect.
+        # ! Instead we can use stride=2 in the conv layer to achieve similar effect.
         # nn.MaxPool1d(2, 2),
         nn.Conv1d(out0, out1, kernel_size=ks - 2, stride=2, padding=(ks - 2) // 2),
         nn.BatchNorm1d(out1),
         nn.ReLU(),
+        nn.Dropout(dropout_conv),
         # nn.MaxPool1d(2, 2), # ! see comment above
         nn.Conv1d(out1, out2, kernel_size=ks - 4, stride=2, padding=(ks - 4) // 2),
         nn.BatchNorm1d(out2),
         nn.ReLU(),
+        nn.Dropout(dropout_conv),
         # nn.MaxPool1d(2, 2),  # ! see comment above
         # Using AdaptiveAvgPool1d makes the output of the CNN independent of the
         # input length and avoids parameters explosion when flattening.
@@ -50,11 +58,11 @@ def make_model():
         nn.LazyLinear(linear),
         nn.BatchNorm1d(linear),
         nn.ReLU(),
-        nn.Dropout(dropout),
+        nn.Dropout(dropout_linear),
         nn.Linear(linear, linear),
         nn.BatchNorm1d(linear),
         nn.ReLU(),
-        nn.Dropout(dropout),
+        nn.Dropout(dropout_linear),
         nn.Linear(linear, 1),
     )
 
@@ -113,6 +121,7 @@ class ModelModule(L.LightningModule):
         # Scalar tensors
         loss: torch.Tensor = self.loss_fn(out, targets)
         pearson: torch.Tensor = pearson_correlation_estimate(out, targets, self.cos_sim)
+        pearson_neg: torch.Tensor = -pearson
 
         # Skip logging if `lightning` is in sanity checking mode.
         if self.trainer.sanity_checking:
@@ -126,7 +135,7 @@ class ModelModule(L.LightningModule):
         # ! because the weights of the model are updated after each batch.
         log = partial(self.log, on_step=False, on_epoch=True)
         log(f"loss/{suffix}", loss, prog_bar=True)
-        log(f"pearson/{suffix}", pearson, prog_bar=False)
+        log(f"pearson/{suffix}", pearson_neg, prog_bar=False)
 
         return loss
 
@@ -247,12 +256,16 @@ def pearson_correlation_estimate(predictions, targets, cos_sim: nn.CosineSimilar
 def make_model_old():
     """
     This is the original model reported in the paper
-    https://www.medrxiv.org/content/10.1101/2024.04.13.24305761v2
+    https://www.medrxiv.org/content/10.1101/2024.04.13.24305761v2.
+
+    NB The original model used 2D convolutions (effectively 1xL pixels), which is
+    an unnecessary complexity. Nucleotides are encoded as "channels", there is no need
+    for the extra dummy dimension.
 
     This models has ~67.8M training parameters.
 
     The model above (`make_model`) is a simplified, much smaller, providing the
-    same performance and accepts as inputs sequences of arbitrary length.
+    same performance.
     """
     return nn.Sequential(
         nn.Conv1d(4, 128, 11, padding="same"),

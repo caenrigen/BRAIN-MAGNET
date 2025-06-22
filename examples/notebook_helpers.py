@@ -1,13 +1,13 @@
 import torch
 from pathlib import Path
-from typing import Union, Literal, Optional
+from typing import Union, Literal, Optional, Callable
 import lightning as L
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
-
+from functools import partial
 import cnn_starr as cnn
 import data_module as dm
 import utils as ut
@@ -33,6 +33,7 @@ def train(
     empty_cache: bool = True,
     weight_decay: float = 0.0,
     augment_w_rev_comp: bool = True,
+    groups_func: Optional[Callable] = partial(dm.bp_dist_groups, threshold=10_000),
 ):
     if empty_cache:
         ut.empty_cache(device)
@@ -94,6 +95,7 @@ def train(
         fold=fold,
         frac_test=frac_test,
         frac_val=frac_val,
+        groups_func=groups_func,
         # DataLoader kwargs:
         batch_size=batch_size,
         # These might give some speed up if cuda is available

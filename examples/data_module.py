@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union, Literal
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 
 import utils as ut
 
@@ -39,6 +39,63 @@ def bins_log2(s, n: int = 8):
     # There are several "outliers" in the NCREs activity,
     # take another log2 to compact the data further for assigning bins
     return bins(np.log2(s + 1), n=n)
+
+
+def bp_dist_group(
+    s_sorted: pd.Series,
+    threshold: int = 10_000,
+    start: int = -1,
+):
+    """
+    Group the sequences by their distance from the previous sequence.
+
+    Args:
+        s_sorted: sorted series of positions (on the same chromosome)
+        threshold: maximum distance between two sequences to be in the same group
+        start: start group id
+
+    Returns:
+        array of group ids
+    """
+    group_id = start + 1
+    groups = np.empty(len(s_sorted), dtype=np.int64)
+    groups[0] = group_id
+    idx = 1
+    for pos_prev, pos in zip(s_sorted[:-1], s_sorted[1:]):
+        if pos - pos_prev > threshold:
+            group_id += 1
+        groups[idx] = group_id
+        idx += 1
+    return groups
+
+
+def bp_dist_groups(df_enrichment: pd.DataFrame, threshold: int = 10_000):
+    """
+    Group the sequences by their distance from the previous sequence.
+
+    Args:
+        df_enrichment: dataframe of enrichment data
+        threshold: maximum distance between two sequences to be in the same group
+    """
+    for col in ["Chr", "Start", "End"]:
+        assert col in df_enrichment.columns, f"{col!r} not in {df_enrichment.columns=}"
+    dfs = []
+    start = -1
+    for _, df in df_enrichment.groupby("Chr"):
+        df.sort_values("Start", inplace=True)
+        mid = df.Start + (df.End - df.Start) / 2
+        groups = bp_dist_group(mid, threshold=threshold, start=start)
+        start = groups[-1]
+        df["Seq_group"] = groups
+        dfs.append(df)
+    df_w_groups = pd.concat(dfs)
+
+    # Ensure we preserved the original order of the sequences
+    assert (df_w_groups.Chr == df_enrichment.Chr).all()
+    assert (df_w_groups.Start == df_enrichment.Start).all()
+    assert (df_w_groups.End == df_enrichment.End).all()
+
+    return df_w_groups.Seq_group
 
 
 def interleave_with_rev_comp(data: np.ndarray, data_rev: np.ndarray):
@@ -112,6 +169,9 @@ class DataModule(L.LightningDataModule):
         augment_w_rev_comp: bool,
         targets_col: Union[Literal["ESC_log2_enrichment", "NSC_log2_enrichment"], str],
         x_col: str = "Seq",
+        chr_col: str = "Chr",
+        chr_pos_start_col: str = "Start",
+        chr_pos_end_col: str = "End",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
         random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
@@ -120,6 +180,7 @@ class DataModule(L.LightningDataModule):
         frac_val: float = 0.10,
         validate_split: bool = True,
         bins_func: Callable = bins_log2,
+        groups_func: Optional[Callable] = partial(bp_dist_groups, threshold=10_000),
         padding: int = 1000,
         # DataLoader kwargs:
         batch_size: int = 128,
@@ -160,6 +221,9 @@ class DataModule(L.LightningDataModule):
 
         self.augment_w_rev_comp = augment_w_rev_comp
         self.x_col = x_col
+        self.chr_col = chr_col
+        self.chr_pos_start_col = chr_pos_start_col
+        self.chr_pos_end_col = chr_pos_end_col
         self.targets_col = targets_col
         self.random_state = random_state
         self.folds = folds or None  # 0 is equivalent to no folds
@@ -167,6 +231,7 @@ class DataModule(L.LightningDataModule):
         self.frac_test = frac_test
         self.frac_val = frac_val
         self.bins_func = bins_func
+        self.groups_func = groups_func
         self.padding = padding
         self.validate_split = validate_split
 
@@ -234,7 +299,13 @@ class DataModule(L.LightningDataModule):
     def setup(self, stage: Literal["fit", "test", None] = None):
         """It is ok to make state assignments in this method"""
 
-        df = pd.read_csv(self.fp_dataset, usecols=[self.targets_col])
+        cols = [
+            self.targets_col,
+            self.chr_col,
+            self.chr_pos_start_col,
+            self.chr_pos_end_col,
+        ]
+        df = pd.read_csv(self.fp_dataset, usecols=cols)
         self.targets = df[self.targets_col].to_numpy()
 
         assert self.fp_npy_1hot_seqs is not None
@@ -270,15 +341,39 @@ class DataModule(L.LightningDataModule):
             return  # the rest of the code is not needed for test stage
 
         # Make a train/val split, k-folds for cross-validation or simple split
+        # See https://scikit-learn.org/stable/auto_examples/model_selection/plot_cv_indices.html
+        # for a visual explanation of the different cross-validation strategies.
         if self.folds is not None:
-            kf = StratifiedKFold(
-                n_splits=self.folds,
-                shuffle=True,
-                random_state=self.random_state,
-            )
             targets_train_val = self.targets[indices_train_val]
-            # X is dummy, it is not relevant for stratified splitting
-            split = kf.split(X=targets_train_val, y=self.bins_func(targets_train_val))
+            if self.groups_func is None:
+                skf = StratifiedKFold(
+                    n_splits=self.folds,
+                    shuffle=True,
+                    random_state=self.random_state,
+                )
+                split = skf.split(
+                    X=targets_train_val,
+                    y=self.bins_func(targets_train_val),
+                )
+            else:
+                # With group k-fold, we ensure that the sequences that are close to
+                # each other in the genome are not split between the training and the
+                # validation sets. This is intended to minimize the dependence of
+                # model performance on the choice of the seed used to split the data.
+                # DNA sequences that are close to each other tend to repeat repeat
+                # certain patters. If we split the data without considering this,
+                # we inflate the performance of the model.
+                sgkf = StratifiedGroupKFold(
+                    n_splits=self.folds,
+                    shuffle=True,
+                    random_state=self.random_state,
+                )
+                # X is dummy, it is not relevant for stratified splitting
+                split = sgkf.split(
+                    X=targets_train_val,
+                    y=self.bins_func(targets_train_val),
+                    groups=self.groups_func(df),
+                )
             for i, (train_idxs, val_idxs) in enumerate(split):
                 if i != self.fold:
                     continue  # only run for the current fold, continue otherwise

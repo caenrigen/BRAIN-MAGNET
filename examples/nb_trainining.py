@@ -29,6 +29,7 @@ from tqdm.auto import tqdm
 # local modules
 import utils as ut
 import notebook_helpers as nh
+import data_module as dm
 
 
 # %%
@@ -65,6 +66,8 @@ dir_train = dir_data / "train"  # Tensorboard logs and model checkpoints
 fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 assert fp_dataset.exists()
 
+augment_w_rev_comp = True
+
 task: Literal["ESC", "NSC"] = "ESC"
 
 # The training should result in exactly the same weights using the same seed,
@@ -76,17 +79,18 @@ task: Literal["ESC", "NSC"] = "ESC"
 random_state = 20240413  # for reproducibility
 
 # We train for a fixed number of epochs and post select the best model
-max_epochs = 75
+max_epochs = 20
 
 batch_size = 256
 learning_rate = 0.01
+weight_decay = 1e-6  # tiny weight decay to avoid huge weights (regularization)
 
 # Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
 # the data. Each time the data used for validation is different.
-folds = None
+folds = 5
 
 folds_list = range(folds) if folds else []
-frac_val = 0.10  # only relevant if not using folds
+frac_val = 0.00  # only relevant if not using folds
 
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
@@ -103,8 +107,11 @@ train = partial(
     frac_test=frac_test,
     frac_val=frac_val,
     folds=folds,
+    groups_func=partial(dm.bp_dist_groups, threshold=100_000),
     random_state=random_state,
     device=device,
+    weight_decay=weight_decay,
+    augment_w_rev_comp=augment_w_rev_comp,
 )
 
 if folds:
@@ -116,3 +123,5 @@ if folds:
         # break  # if we want to run a single fold only
 else:
     res = train(fold=0)
+
+# %%

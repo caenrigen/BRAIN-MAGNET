@@ -18,7 +18,7 @@
 # %autoreload all
 
 # %%
-from typing import Optional
+from typing import Optional, Union, List
 from pathlib import Path
 import numpy as np
 import torch
@@ -69,7 +69,10 @@ datamodule = dm.DataModule(
 datamodule.setup()
 
 if sample:
-    indices = np.arange(sample)
+    if isinstance(sample, int):
+        indices = np.arange(sample)
+    else:
+        indices = sample
     dataloader = datamodule.DataLoader(dataset=datamodule.dataset, sampler=indices)
 else:
     dataloader = datamodule.full_dataloader()
