@@ -135,7 +135,7 @@ fp_fasta  # ~110 MB
 # We pass the output file to the `spanseq` command:
 #
 # ```bash
-# spanseq split -c 0.25 -i Enhancers_sequences.fa -s nucleotides -o ./spanseq_output -k 17 -m 15 -n 10 -f merged_table -d mash -l 1000 -a hobohm_split -hd 0.90 -H -b 5 -CP "/opt/homebrew/anaconda3/envs/spanseq_ccphylo/bin/ccphylo"
+# spanseq split -c 0.25 -i Enhancers_sequences.fa -s nucleotides -o ./spanseq_output -k 17 -n 10 -f merged_table -d mash -l 1000 -a hobohm_split -hd 0.90 -H -b 5 -r -CP "/opt/homebrew/anaconda3/envs/spanseq_ccphylo/bin/ccphylo"
 # ```
 #
 # 💡 **Tip for macOS on Apple Silicon (CPU M1, M1 Pro, etc.)**
