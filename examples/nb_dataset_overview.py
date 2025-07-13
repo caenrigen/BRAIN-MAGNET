@@ -22,7 +22,6 @@ from pathlib import Path
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
 
 # %%
 import data_module as dm
@@ -109,52 +108,38 @@ ax.set_aspect("equal")
 _ = ax.set_ylim(ax.get_ylim()[0], ax.get_xlim()[1])
 
 # %% [markdown]
-# # Export sequences to Fasta
+# # Similarity clusters to prevent leakage
 #
 
+# %%
+fp_clusters = dir_data / "mmseq2res_cluster.tsv"
+df_clusters = pd.read_table(fp_clusters, names=["cluster_id", "seq_id"])
+s = df_clusters.cluster_id.value_counts()
+
+s[:30].plot(kind="bar")
+
+s[s > 1].sum()
+
 # %% [markdown]
-# Export to fast so that we can run SpanSeq on the sequences.
-# References:
+# ## Add cluster id to dataset file
 #
-# - https://doi.org/10.1093/nargab/lqae106
-# - https://github.com/genomicepidemiology/SpanSeq
+# We will use the cluster ids to create groups that must remain together when spliting the data into training/validation sets.
 #
 
 # %%
 df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS)
 
-fp_fasta = fp_dataset.parent / "Enhancers_sequences.fa"
+df_clusters.set_index("seq_id", inplace=True)
+df_clusters.sort_index(inplace=True)
 
-with open(fp_fasta, "w") as f:
-    for r in df_enrichment.itertuples():
-        line = f">{r.Index:06d}\n{r.Seq}\n"
-        f.write(line)
-fp_fasta  # ~110 MB
+df_enrichment["Cluster_id"] = df_clusters.cluster_id.to_numpy()
+df_enrichment.head()
 
-# %% [markdown]
-# We pass the output file to the `spanseq` command:
-#
-# ```bash
-# spanseq split -c 0.25 -i Enhancers_sequences.fa -s nucleotides -o ./spanseq_output -k 17 -n 10 -f merged_table -d mash -l 1000 -a hobohm_split -hd 0.90 -H -b 5 -r -CP "/opt/homebrew/anaconda3/envs/spanseq_ccphylo/bin/ccphylo"
-# ```
-#
-# 💡 **Tip for macOS on Apple Silicon (CPU M1, M1 Pro, etc.)**
-#
-# `-CP "/opt/homebrew/anaconda3/envs/spanseq_ccphylo/bin/ccphylo"` was used to point to a `ccphylo` installed in a conda environment with:
-#
-# ```bash
-# conda create -n spanseq_ccphylo
-# conda activate spanseq_ccphylo
-# conda config --env --set subdir osx-64
-# conda install ccphylo
-# conda deactivate # deactivate&activate to be sure the `ccphylo` command is found
-# conda activate spanseq_ccphylo
-# which ccphylo # show path to the `ccphylo` executable
-# ```
-#
-# This was needed because `ccphylo` is not available for the `osx-arm64` CPU architecture (at the time of the writing).
-#
-# Similarly, the `fasta3` conda package is not available for `osx-arm64`, but that is required only if you invoke the (slow) `spanseq -d identity ...` command which requires `ggsearch36` command (provided by `fasta3`). Because we used `-d mash`, we skipped installing `fasta3` package altogether (e.g. remove it from `spanseqenv.yml` before creating the `spanseq` conda env).
-#
-# You don't need any of this if you installed `ccphylo` in the same `spanseq` environment (or via some other means and it is available in your shell when invoking `spanseq ...` command).
-#
+# %%
+df_enrichment.to_csv(fp_dataset, index=False)
+
+# %%
+df_enrichment = pd.read_csv(fp_dataset, usecols=dm.DATASET_COLS)
+df_enrichment.head()
+
+# %%

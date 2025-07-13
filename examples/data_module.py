@@ -24,6 +24,8 @@ DATASET_COLS = (
     "N_counts",  # Number of "N"s in the sequence
     "NSC_log2_enrichment",  # Log2 enrichment of NSC
     "ESC_log2_enrichment",  # Log2 enrichment of ESC
+    # Used to prevent information leakage between training and validation sets
+    "Cluster_id",  # Cluster id
     "Seq",  # Sequence
 )
 # for convenience, because we often don't need the sequences (which is heavy on memory)
@@ -169,9 +171,6 @@ class DataModule(L.LightningDataModule):
         augment_w_rev_comp: bool,
         targets_col: Union[Literal["ESC_log2_enrichment", "NSC_log2_enrichment"], str],
         x_col: str = "Seq",
-        chr_col: str = "Chr",
-        chr_pos_start_col: str = "Start",
-        chr_pos_end_col: str = "End",
         fp_npy_1hot_seqs: Optional[Union[Path, str]] = None,
         random_state: int = 20240413,
         folds: Optional[int] = None,  # Number of folds for cross-validation
@@ -221,9 +220,6 @@ class DataModule(L.LightningDataModule):
 
         self.augment_w_rev_comp = augment_w_rev_comp
         self.x_col = x_col
-        self.chr_col = chr_col
-        self.chr_pos_start_col = chr_pos_start_col
-        self.chr_pos_end_col = chr_pos_end_col
         self.targets_col = targets_col
         self.random_state = random_state
         self.folds = folds or None  # 0 is equivalent to no folds
@@ -299,13 +295,7 @@ class DataModule(L.LightningDataModule):
     def setup(self, stage: Literal["fit", "test", None] = None):
         """It is ok to make state assignments in this method"""
 
-        cols = [
-            self.targets_col,
-            self.chr_col,
-            self.chr_pos_start_col,
-            self.chr_pos_end_col,
-        ]
-        df = pd.read_csv(self.fp_dataset, usecols=cols)
+        df = pd.read_csv(self.fp_dataset, usecols=list(DATASET_COLS_NO_SEQ))
         self.targets = df[self.targets_col].to_numpy()
 
         assert self.fp_npy_1hot_seqs is not None

@@ -32,11 +32,6 @@ assert dir_data.is_dir()
 dir_cb_score = dir_data / "cb_score"
 dir_cb_score.mkdir(exist_ok=True)
 
-# %%
-# https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_meme.txt
-fp_jaspar = dir_data / "JASPAR2024_CORE_non-redundant_pfms_meme.txt"
-assert fp_jaspar.is_file()
-
 # %% [markdown]
 # # Input sequences and the SHAP values scores
 #
@@ -46,6 +41,7 @@ assert fp_jaspar.is_file()
 # %%
 fp_sequences = dir_data / "seqs.npy"
 fp_shaps = dir_cb_score / "ESC_cdb72439_shap_vals_30shufs.npy"
+# fp_shaps = dir_cb_score / "NSC_2e24fb14_shap_vals_30shufs.npy"
 
 sequences = np.load(fp_sequences, mmap_mode="r")
 hypothetical_contribs = np.load(fp_shaps, mmap_mode="r")
@@ -62,7 +58,7 @@ print(sequences.shape, hypothetical_contribs.shape)
 # %%
 # This controls how many seqlets are considered initially for clustering.
 # Here we use a large number since we have a big dataset.
-max_seqlets = 50000
+max_seqlets = 30000
 
 assert hypothetical_contribs.dtype == np.float32, hypothetical_contribs.dtype
 pos_patterns, neg_patterns = modiscolite.tfmodisco.TFMoDISco(
@@ -105,6 +101,11 @@ with open(fp_neg_patterns, "wb") as f:
 # %% [markdown]
 # # Match motifs against JASPAR database and visualizing matches
 #
+
+# %%
+# https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_meme.txt
+fp_jaspar = dir_data / "JASPAR2024_CORE_non-redundant_pfms_meme.txt"
+assert fp_jaspar.is_file()
 
 # %%
 # `modiscolite.report.report_motifs` uses `tomtom` for matching motifs against a

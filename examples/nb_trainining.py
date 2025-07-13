@@ -78,8 +78,10 @@ task: Literal["ESC", "NSC"] = "ESC"
 # should be exactly the same.
 random_state = 20240413  # for reproducibility
 
+random_state = 2025
+
 # We train for a fixed number of epochs and post select the best model
-max_epochs = 20
+max_epochs = 25
 
 batch_size = 256
 learning_rate = 0.01
@@ -107,7 +109,8 @@ train = partial(
     frac_test=frac_test,
     frac_val=frac_val,
     folds=folds,
-    groups_func=partial(dm.bp_dist_groups, threshold=100_000),
+    # groups_func=partial(dm.bp_dist_groups, threshold=100_000),
+    groups_func=lambda df: df.Cluster_id,
     random_state=random_state,
     device=device,
     weight_decay=weight_decay,
