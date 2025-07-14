@@ -23,6 +23,7 @@ from functools import partial
 from typing import Literal
 
 import torch
+import lightning as L
 from tqdm.auto import tqdm
 
 # %%
@@ -30,6 +31,7 @@ from tqdm.auto import tqdm
 import utils as ut
 import notebook_helpers as nh
 import data_module as dm
+import explainn as enn
 
 
 # %%
@@ -62,7 +64,8 @@ device
 
 # %%
 dir_data = Path("./data")
-dir_train = dir_data / "train"  # Tensorboard logs and model checkpoints
+dir_train = dir_data / "train_explainn"  # Tensorboard logs and model checkpoints
+dir_train.mkdir(exist_ok=True)
 fp_dataset = dir_data / "Enhancer_activity_with_str_sequences.csv.gz"
 assert fp_dataset.exists()
 
@@ -76,18 +79,17 @@ task: Literal["ESC", "NSC"] = "ESC"
 # Nonetheless, be aware that even if you keep everything the same but the hardware
 # is different you might get slightly different results. On the same machine results
 # should be exactly the same.
-random_state = 20240413  # for reproducibility
-
-random_state = 2025
+seed_split = 413  # for reproducibility
+seed_train = 413
 
 # We train for a fixed number of epochs and post select the best model
-max_epochs = 25
+max_epochs = 15
 
 batch_size = 256
-learning_rate = 0.01
+learning_rate = 0.001
 weight_decay = 1e-6  # tiny weight decay to avoid huge weights (regularization)
 
-# Train 5 models, each one trained on 4/5=80% of the data and validated on 1/5=20% of
+# Train 4 models, each one trained on 3/4=75% of the data and validated on 1/4=25% of
 # the data. Each time the data used for validation is different.
 folds = 5
 
@@ -97,6 +99,18 @@ frac_val = 0.00  # only relevant if not using folds
 # Fraction of the initial dataset to set aside for testing.
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
 frac_test = 0.00
+
+explainn_hyper_params = dict(
+    num_cnns=20,
+    filter_size=11,
+    num_fc=2,
+    pool_size=7,
+    pool_stride=7,
+    num_classes=1,
+    channels_mid=100,  # only relevant if num_fc >= 2
+    input_length=1000,
+)
+make_model = partial(enn.ExplaiNN, **explainn_hyper_params)
 
 train = partial(
     nh.train,
@@ -111,10 +125,13 @@ train = partial(
     folds=folds,
     # groups_func=partial(dm.bp_dist_groups, threshold=100_000),
     groups_func=lambda df: df.Cluster_id,
-    random_state=random_state,
+    seed_train=seed_train,
+    seed_split=seed_split,
     device=device,
     weight_decay=weight_decay,
     augment_w_rev_comp=augment_w_rev_comp,
+    make_model=make_model,
+    **explainn_hyper_params,
 )
 
 if folds:
@@ -122,6 +139,7 @@ if folds:
     for fold in tqdm(folds_list, desc="Folds"):
         completed = train(fold=fold, version=version)
         if not completed:
+            do_break = True
             break
         # break  # if we want to run a single fold only
 else:

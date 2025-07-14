@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from pathlib import Path
 from typing import Union, Literal, Optional, Callable
 import lightning as L
@@ -27,24 +28,31 @@ def train(
     max_epochs: int,
     frac_test: float,
     frac_val: float,
-    random_state: int,
+    seed_train: int,
+    seed_split: int,
     device: torch.device,
     version: Optional[str] = None,
     empty_cache: bool = True,
     weight_decay: float = 0.0,
     augment_w_rev_comp: bool = True,
     groups_func: Optional[Callable] = partial(dm.bp_dist_groups, threshold=10_000),
+    # Pass a model-making function (instead of a model itself) to ensure
+    # reproducibility by instantiating the model after seeding everything.
+    make_model: Callable[[], nn.Module] = cnn.make_model_starr,
+    **hyper_params,
 ):
     if empty_cache:
         ut.empty_cache(device)
-    # We did not use workers, but we keep it here for future reference and reminder.
-    L.seed_everything(random_state, workers=True)  # for reproducibility
 
-    model = cnn.ModelModule(
+    # NB if you ever use multiple multiprocessing workers, careful with the seeding.
+    L.seed_everything(seed_train, workers=True)  # for reproducibility
+
+    model_module = cnn.ModelModule(
         learning_rate=learning_rate,
         # Don't change this for training, reverse complement is handled by the data
         # module as augmentation data.
         forward_mode="forward",
+        make_model=make_model,
         # The rest are "hyperparameters" for logging purposes.
         task=task,
         batch_size=batch_size,
@@ -54,8 +62,10 @@ def train(
         fold=fold,
         max_ep=max_epochs,
         weight_decay=weight_decay,
-        random_state=random_state,
+        seed_train=seed_train,
+        seed_split=seed_split,
         augment_w_rev_comp=augment_w_rev_comp,
+        **hyper_params,
     )
     # print(model)
 
@@ -87,7 +97,7 @@ def train(
 
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
-        random_state=random_state,
+        random_state=seed_split,
         augment_w_rev_comp=augment_w_rev_comp,
         targets_col=f"{task}_log2_enrichment",
         x_col="Seq",
@@ -103,13 +113,13 @@ def train(
         # pin_memory_device="cuda",
     )
     try:
-        trainer.fit(model, datamodule=datamodule)
+        trainer.fit(model_module, datamodule=datamodule)
     except (KeyboardInterrupt, NameError):
         logger.info("Training interrupted by user")
         return False
 
     # Free up memory
-    model.cpu()
+    model_module.cpu()
     if empty_cache:
         ut.empty_cache(device)
 

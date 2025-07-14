@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Literal, Optional, Union, Tuple
+from typing import Callable, Literal, Optional, Union, Tuple
 
 import torch
 from torch import nn
@@ -8,7 +8,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
 
 
-def make_model(
+def make_model_starr(
     channels: int = len(ut.DNA_ALPHABET),
     ks: int = 11,
     out0: int = 16,
@@ -74,7 +74,7 @@ class ModelModule(L.LightningModule):
         weight_decay: float = 0.0,  # e.g. 1e-6
         forward_mode: Literal["forward", "reverse_complement", "mean"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
-        model: Optional[nn.Module] = None,
+        make_model: Callable[[], nn.Module] = make_model_starr,
         **hyper_params,
     ):
         super().__init__()
@@ -100,7 +100,7 @@ class ModelModule(L.LightningModule):
         # is more intuitive than the values of the MSE loss function.
         self.cos_sim = nn.CosineSimilarity(dim=0, eps=1e-6)
 
-        self.model = model or make_model()
+        self.model = make_model()
 
     def forward(self, x):
         if self.forward_mode == "forward":
