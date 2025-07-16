@@ -33,6 +33,9 @@ import cnn_starr as cnn
 # warnings and (potentially) use an incorrect handler.
 dpyt = shap.explainers.deep.deep_pytorch
 dpyt.op_handler["Flatten"] = dpyt.passthrough
+dpyt.op_handler["Unsqueeze"] = dpyt.passthrough
+dpyt.op_handler["Squeeze"] = dpyt.passthrough
+dpyt.op_handler["Exp"] = dpyt.nonlinear_1d
 
 
 def tensor_to_onehot(t):
