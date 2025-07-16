@@ -28,6 +28,7 @@ def train(
     max_epochs: int,
     frac_test: float,
     frac_val: float,
+    frac_train_sample: float,
     seed_train: int,
     seed_split: int,
     device: torch.device,
@@ -58,6 +59,7 @@ def train(
         batch_size=batch_size,
         frac_test=frac_test,
         frac_val=frac_val,
+        frac_train_sample=frac_train_sample,
         folds=folds,
         fold=fold,
         max_ep=max_epochs,
@@ -105,6 +107,7 @@ def train(
         fold=fold,
         frac_test=frac_test,
         frac_val=frac_val,
+        frac_train_sample=frac_train_sample,
         groups_func=groups_func,
         # DataLoader kwargs:
         batch_size=batch_size,
@@ -126,7 +129,12 @@ def train(
     return True
 
 
-def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
+def pick_best_checkpoints(
+    df_ckpts: pd.DataFrame,
+    plot: bool = False,
+    col_train: str = "loss_train",
+    col_val: str = "loss_val",
+):
     best_checkpoints = {}
     folds = len(df_ckpts.fold.unique())
     if plot:
@@ -139,14 +147,19 @@ def pick_best_checkpoints(df_ckpts: pd.DataFrame, plot: bool = False):
         fig = axs = None
     for fold in range(folds):
         df = df_ckpts[df_ckpts.fold == fold].copy()
-        best_epoch = dm.pick_checkpoint(df, ax=axs[fold] if plot else None)
+        best_epoch = dm.pick_checkpoint(
+            df,
+            ax=axs[fold] if plot else None,
+            col_train=col_train,
+            col_val=col_val,
+        )
         df_best = df[df.epoch == best_epoch]
         assert len(df_best) == 1
         best_checkpoints[fold] = df_best.fp.iloc[0]
         if axs is not None:
-            max_ = df_ckpts.loss_val.quantile(0.95)  # don't plot outliers
-            min_ = df_ckpts.loss_train.min()
-            axs[fold].set_ylim(min_ - (max_ - min_) * 0.05, max_)
+            max_ = df_ckpts[col_val].quantile(0.97)  # don't plot outliers
+            min_ = df_ckpts[col_train].min()
+            axs[fold].set_ylim(min_ - (max_ - min_) * 0.03, max_)
 
     if fig is not None:
         fig.tight_layout()
@@ -158,10 +171,12 @@ def evaluate_model(
     fp_checkpoint: Path,
     fp_dataset: Path,
     device: torch.device,
+    groups_func: Optional[Callable],
+    make_model: Callable[[], nn.Module],
     augment_w_rev_comp: Optional[bool] = None,
     dataloader: str = "test_dataloader",
 ):
-    model = cnn.ModelModule.load_from_checkpoint(fp_checkpoint)
+    model = cnn.ModelModule.load_from_checkpoint(fp_checkpoint, make_model=make_model)
 
     # Allow to override or use the value from training
     if augment_w_rev_comp is None:
@@ -171,13 +186,15 @@ def evaluate_model(
     datamodule = dm.DataModule(
         fp_dataset=fp_dataset,
         targets_col=f"{model.hparams_initial.task}_log2_enrichment",
-        random_state=model.hparams_initial.random_state,
+        random_state=model.hparams_initial.seed_split,
         folds=model.hparams_initial.folds,
         fold=model.hparams_initial.fold,
         frac_test=model.hparams_initial.frac_test,
         frac_val=model.hparams_initial.frac_val,
+        frac_train_sample=model.hparams_initial.frac_train_sample,
         batch_size=model.hparams_initial.batch_size,
         augment_w_rev_comp=augment_w_rev_comp,
+        groups_func=groups_func,
     )
     datamodule.setup()
     dataloader = getattr(datamodule, dataloader)()

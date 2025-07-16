@@ -177,6 +177,7 @@ class DataModule(L.LightningDataModule):
         fold: int = 0,  # Current fold index (0 to folds-1)
         frac_test: float = 0.10,
         frac_val: float = 0.10,
+        frac_train_sample: float = 0.10,
         validate_split: bool = True,
         bins_func: Callable = bins_log2,
         groups_func: Optional[Callable] = partial(bp_dist_groups, threshold=10_000),
@@ -226,6 +227,7 @@ class DataModule(L.LightningDataModule):
         self.fold = fold
         self.frac_test = frac_test
         self.frac_val = frac_val
+        self.frac_train_sample = frac_train_sample
         self.bins_func = bins_func
         self.groups_func = groups_func
         self.padding = padding
@@ -318,14 +320,14 @@ class DataModule(L.LightningDataModule):
         self.indices_full = self.concat_rev(indices_train_val)
         if self.frac_test:
             # Put aside a fraction of the data for a final testing
-            indices_train_val, self.indices_test = train_test_split(
+            indices_train_val, indices_test = train_test_split(
                 indices_train_val,
                 test_size=self.frac_test,
                 random_state=self.random_state,
                 stratify=self.bins_func(self.targets),
                 shuffle=True,  # stratify requires shuffle=True
             )
-            self.indices_test = self.concat_rev(self.indices_test)
+            self.indices_test = self.concat_rev(indices_test)
 
         if stage == "test":
             return  # the rest of the code is not needed for test stage
@@ -341,6 +343,8 @@ class DataModule(L.LightningDataModule):
                     shuffle=True,
                     random_state=self.random_state,
                 )
+                # X is dummy, it is not relevant for splitting, the split does not
+                # return X values, only indices.
                 split = skf.split(
                     X=targets_train_val,
                     y=self.bins_func(targets_train_val),
@@ -358,7 +362,8 @@ class DataModule(L.LightningDataModule):
                     shuffle=True,
                     random_state=self.random_state,
                 )
-                # X is dummy, it is not relevant for stratified splitting
+                # X is dummy, it is not relevant for splitting, the split does not
+                # return X values, only indices.
                 split = sgkf.split(
                     X=targets_train_val,
                     y=self.bins_func(targets_train_val),
@@ -368,8 +373,8 @@ class DataModule(L.LightningDataModule):
                 if i != self.fold:
                     continue  # only run for the current fold, continue otherwise
                 assert len(val_idxs) < len(train_idxs)
-                self.indices_train = self.concat_rev(indices_train_val[train_idxs])
-                self.indices_val = self.concat_rev(indices_train_val[val_idxs])
+                indices_train = indices_train_val[train_idxs]
+                indices_val = indices_train_val[val_idxs]
         else:
             indices_train, indices_val = train_test_split(
                 indices_train_val,
@@ -378,8 +383,26 @@ class DataModule(L.LightningDataModule):
                 stratify=self.bins_func(self.targets[indices_train_val]),
                 shuffle=True,  # stratify requires shuffle=True
             )
-            self.indices_train = self.concat_rev(indices_train)
-            self.indices_val = self.concat_rev(indices_val)
+
+        # A sample of the training set intended for evaluating the model after each
+        # epoch. This should yield a reasonably accurate estimate of the performance of
+        # the model on the training set (at the cost of a bit of extra computation).
+        indices_train_sample = None
+        if self.frac_train_sample:
+            _, indices_train_sample = train_test_split(
+                indices_train,
+                test_size=self.frac_train_sample,
+                random_state=self.random_state,
+                stratify=self.bins_func(self.targets[indices_train]),
+                shuffle=True,  # stratify requires shuffle=True
+            )
+
+        self.indices_train = self.concat_rev(indices_train)
+        self.indices_val = self.concat_rev(indices_val)
+        if indices_train_sample is not None:
+            self.indices_train_sample = self.concat_rev(indices_train_sample)
+        else:
+            self.indices_train_sample = None
 
         if self.validate_split:
             self.validate_data_split()
@@ -421,7 +444,16 @@ class DataModule(L.LightningDataModule):
 
     def val_dataloader(self):
         assert self.indices_val is not None
-        return self.DataLoader(self.dataset, sampler=self.indices_val)
+        dl_val = self.DataLoader(self.dataset, sampler=self.indices_val)
+
+        if self.indices_train_sample is None:
+            return dl_val
+
+        assert self.indices_train_sample is not None
+        return [
+            dl_val,
+            self.DataLoader(self.dataset, sampler=self.indices_train_sample),
+        ]
 
     def test_dataloader(self):
         assert self.indices_test is not None
@@ -493,7 +525,7 @@ def pick_checkpoint(
         df.plot(y=cols, marker=".", ax=ax)
 
     # Choose the lowest validation loss
-    epoch = df.sort_values(by="loss_val").index.values[0]
+    epoch = df.sort_values(by=col_val).index.values[0]
 
     if ax:
         ax.vlines(epoch, min_, max_, color="red", linestyle="--")

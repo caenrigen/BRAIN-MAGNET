@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from functools import partial
 from typing import Callable, Literal, Optional, Union, Tuple
 
@@ -6,6 +7,7 @@ from torch import nn
 import lightning as L
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils as ut
+import torchmetrics
 
 
 def make_model_starr(
@@ -75,6 +77,7 @@ class ModelModule(L.LightningModule):
         forward_mode: Literal["forward", "reverse_complement", "mean"] = "forward",
         loss_fn: nn.Module = nn.MSELoss(),
         make_model: Callable[[], nn.Module] = make_model_starr,
+        window_running_mean: int = 10,
         **hyper_params,
     ):
         super().__init__()
@@ -95,6 +98,10 @@ class ModelModule(L.LightningModule):
         self.save_hyperparameters(hyper_params, logger=False)
 
         self.loss_fn = loss_fn
+
+        self.running_loss = torchmetrics.RunningMean(window=window_running_mean)
+        self.running_pearson = torchmetrics.RunningMean(window=window_running_mean)
+
         # Auxiliary variable to estimate the Pearson correlation.
         # It is handy to observe the Pearson correlation in the TensorBoard, its value
         # is more intuitive than the values of the MSE loss function.
@@ -102,7 +109,12 @@ class ModelModule(L.LightningModule):
 
         self.model = make_model()
 
+        self.explainn_num_cnns = hyper_params.get("num_cnns", None)
+
     def forward(self, x):
+        if self.explainn_num_cnns is not None:
+            x = x.repeat(1, self.explainn_num_cnns, 1)
+
         if self.forward_mode == "forward":
             return self.model(x)
         elif self.forward_mode == "reverse_complement":
@@ -129,21 +141,32 @@ class ModelModule(L.LightningModule):
 
         # Logs the loss and pearson correlation (this shows up in TensorBoard)
 
-        # The logging will average automatically over the batches of the epoch.
-        # ! This is not equivalent to the loss that is obtained by evaluating the
-        # ! end-of-epoch model on the entire training/validation/test set. This is
-        # ! because the weights of the model are updated after each batch.
-        log = partial(self.log, on_step=False, on_epoch=True)
-        log(f"loss/{suffix}", loss, prog_bar=True)
-        log(f"pearson/{suffix}", pearson_neg, prog_bar=False)
+        log = partial(self.log, on_step=False, on_epoch=True, add_dataloader_idx=False)
+        if suffix == "train":
+            # Log a moving average mainly to avoid the massive initial loss.
+            self.running_loss.update(loss)
+            self.running_pearson.update(pearson_neg)
+            # ! This is not equivalent to the loss that is obtained by evaluating the
+            # ! end-of-epoch model on the entire training set. This is because the
+            # ! weights of the model are updated after each batch during the training.
+            # ! Evaluating the end-of-epoch model on the entire training set should
+            # ! result in a lower loss than the loss that is logged here.
+            # ! These batch-derived metrics are intended only as an indication that
+            # ! the optimizer is making progress (per batch!).
+            log(f"loss/{suffix}", self.running_loss, prog_bar=True)
+            log(f"pearson/{suffix}", self.running_pearson, prog_bar=False)
+        else:
+            log(f"loss/{suffix}", loss, prog_bar=True)
+            log(f"pearson/{suffix}", pearson_neg, prog_bar=False)
 
         return loss
 
     def training_step(self, batch, batch_idx: int):
         return self._step(batch, batch_idx, suffix="train")
 
-    def validation_step(self, batch, batch_idx: int):
-        return self._step(batch, batch_idx, suffix="val")
+    def validation_step(self, batch, batch_idx: int, dataloader_idx: int):
+        suffix = "val" if dataloader_idx == 0 else "train_sample"
+        return self._step(batch, batch_idx, suffix=suffix)
 
     def test_step(self, batch, batch_idx: int):
         return self._step(batch, batch_idx, suffix="test")
@@ -185,16 +208,22 @@ class LogMetrics(L.Callback):
         self.vpearson: Optional[torch.Tensor] = None
 
     def on_train_epoch_end(self, trainer: L.Trainer, pl_module: ModelModule):
-        """Gets called after validation epoch ends"""
+        """NB gets called after validation epoch ends"""
         if trainer.sanity_checking:
             return
 
-        tloss = trainer.callback_metrics.get("loss/train")
+        key_train = (
+            "train"
+            if trainer.datamodule.indices_train_sample is None
+            else "train_sample"
+        )
+        tloss = trainer.callback_metrics.get(f"loss/{key_train}")
+
         assert tloss is not None
         vloss = trainer.callback_metrics.get("loss/val")
         assert vloss is not None
 
-        tpearson = trainer.callback_metrics.get("pearson/train")
+        tpearson = trainer.callback_metrics.get(f"pearson/{key_train}")
         assert tpearson is not None
         vpearson = trainer.callback_metrics.get("pearson/val")
         assert vpearson is not None
@@ -221,8 +250,10 @@ class LogMetrics(L.Callback):
             # Structure: {category0: {title0: ["Multiline", tags0]}}
             layout = {
                 "main": {
-                    "loss": ["Multiline", ["loss/train", "loss/val"]],
-                    "pearson": ["Multiline", ["pearson/train", "pearson/val"]],
+                    # NB this works by matching the names of the metrics.
+                    # If there is a metric named "loss/val_123" it will be plotted too.
+                    "loss": ["Multiline", [f"loss/{key_train}", "loss/val"]],
+                    "pearson": ["Multiline", [f"pearson/{key_train}", "pearson/val"]],
                 }
             }
             # ! Must be called only once.

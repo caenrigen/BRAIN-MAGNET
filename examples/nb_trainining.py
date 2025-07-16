@@ -80,18 +80,22 @@ task: Literal["ESC", "NSC"] = "ESC"
 # is different you might get slightly different results. On the same machine results
 # should be exactly the same.
 seed_split = 413  # for reproducibility
-seed_train = 413
+
+# Some NVIDIA GPUs implement certain operations in a non-deterministic way.
+# So results might still be slightly different for the same seed.
+seed_train = 416
 
 # We train for a fixed number of epochs and post select the best model
 max_epochs = 15
 
 batch_size = 256
 learning_rate = 0.001
-weight_decay = 1e-6  # tiny weight decay to avoid huge weights (regularization)
+weight_decay = 1e-4  # tiny weight decay to avoid huge weights (regularization)
 
 # Train 4 models, each one trained on 3/4=75% of the data and validated on 1/4=25% of
 # the data. Each time the data used for validation is different.
 folds = 5
+one_fold_only = False
 
 folds_list = range(folds) if folds else []
 frac_val = 0.00  # only relevant if not using folds
@@ -100,17 +104,22 @@ frac_val = 0.00  # only relevant if not using folds
 # 💡 Tip: You can increase it a lot to e.g. 0.90 for a quick training round.
 frac_test = 0.00
 
+# Fraction of the training set to eval on after each epoch, used as an extra sanity
+# check. Monitors the performance of the model on the training set.
+frac_train_sample = 0.20
+
 explainn_hyper_params = dict(
     num_cnns=20,
     filter_size=11,
-    num_fc=2,
+    # num_fc=2,
     pool_size=7,
     pool_stride=7,
     num_classes=1,
     channels_mid=100,  # only relevant if num_fc >= 2
     input_length=1000,
 )
-make_model = partial(enn.ExplaiNN, **explainn_hyper_params)
+# make_model = partial(enn.ExplaiNN, **explainn_hyper_params)
+make_model = partial(enn.make_explainn, **explainn_hyper_params)
 
 train = partial(
     nh.train,
@@ -122,6 +131,7 @@ train = partial(
     max_epochs=max_epochs,
     frac_test=frac_test,
     frac_val=frac_val,
+    frac_train_sample=frac_train_sample,
     folds=folds,
     # groups_func=partial(dm.bp_dist_groups, threshold=100_000),
     groups_func=lambda df: df.Cluster_id,
@@ -139,9 +149,9 @@ if folds:
     for fold in tqdm(folds_list, desc="Folds"):
         completed = train(fold=fold, version=version)
         if not completed:
-            do_break = True
             break
-        # break  # if we want to run a single fold only
+        if one_fold_only:
+            break
 else:
     res = train(fold=0)
 
